@@ -1,0 +1,679 @@
+# Backend API Deprecation Plan
+# Full removal of api.tinyhumans.ai / staging-api.tinyhumans.ai surface
+# Generated: 2026-05-21
+
+---
+
+## Scope decision
+
+billing/, referral/, team/ and all backend-proxy modules are **fully removed with no replacement**.
+This is a single-user local desktop. There is no subscription, no credit balance, no team, no
+referral programme. The UI surfaces for those features are deleted too.
+
+Channel delivery (Telegram, Discord, Slack, etc.) already has a fully native path in
+`channels/runtime/`. The backend-proxied path in `channels/bus.rs` is deleted.
+See Section 5 for the detailed native channel architecture.
+
+---
+
+## Section 1 — Rust: whole modules to delete
+
+### 1.1  src/openhuman/billing/   (4 files)
+All ops hit `/payments/*` and `/coupons/*` on the backend with a session JWT.
+No replacement. Delete:
+  - src/openhuman/billing/mod.rs
+  - src/openhuman/billing/ops.rs            (Stripe plans, credit top-up, portal, cards, coupons)
+  - src/openhuman/billing/schemas.rs        (RPC schema registrations)
+  - src/openhuman/billing/schemas_tests.rs
+
+After deletion, remove the `mod billing;` line and all `billing::` exports from
+src/openhuman/mod.rs and the controller wiring from src/core/all.rs.
+
+### 1.2  src/openhuman/referral/   (3 files)
+All ops hit `/referral/*` on the backend.
+No replacement. Delete:
+  - src/openhuman/referral/mod.rs
+  - src/openhuman/referral/ops.rs           (get_stats, claim_referral)
+  - src/openhuman/referral/schemas.rs
+
+Remove from src/openhuman/mod.rs and src/core/all.rs.
+
+### 1.3  src/openhuman/team/   (4 files)
+All ops hit `/teams/*` on the backend (CRUD, members, invites, role changes).
+No replacement. Delete:
+  - src/openhuman/team/mod.rs
+  - src/openhuman/team/ops.rs
+  - src/openhuman/team/schemas.rs
+  - src/openhuman/team/schemas_tests.rs
+
+Remove from src/openhuman/mod.rs and src/core/all.rs.
+
+### 1.4  src/openhuman/socket/   (~6 files, ~1,550 LOC)
+The entire Socket.IO WebSocket connection to wss://api.tinyhumans.ai/socket.io.
+This is the transport that delivered ChannelInboundMessage events to channels/bus.rs.
+Once deleted, channels/bus.rs has no feeder and can be deleted too (Section 1.5).
+
+Pre-deletion: move `WebhookRouter` out of `SocketManager::shared.webhook_router`.
+The router currently lives here because the backend socket manager held a reference to it.
+After the move, store it in a standalone global in src/openhuman/webhooks/ (a OnceLock
+or similar), and update global_socket_manager().webhook_router() callers to use the
+new accessor.
+
+Files to delete once WebhookRouter is moved:
+  - src/openhuman/socket/mod.rs
+  - src/openhuman/socket/manager.rs         (SocketManager, global accessor, SharedState)
+  - src/openhuman/socket/ws_loop.rs         (Engine.IO/Socket.IO WebSocket loop, ~680 LOC)
+  - src/openhuman/socket/event_handlers.rs  (parse_sio_event, handle_sio_event, ~490 LOC)
+  - src/openhuman/socket/types.rs
+  - src/openhuman/socket/schemas.rs         (socket RPC schema registrations)
+
+Also delete src/api/socket.rs (websocket_url builder only used by ws_loop).
+Remove socket module from src/openhuman/mod.rs.
+Remove SocketManager startup from src/core/jsonrpc.rs.
+
+### 1.5  src/openhuman/channels/bus.rs   (+ bus_tests.rs if present)
+The ChannelInboundSubscriber subscribes to DomainEvent::ChannelInboundMessage events
+emitted by the backend socket. All outbound operations (send_channel_reply,
+send_typing_indicator, send_filler_message, delete_channel_message, progressive edits)
+call BackendOAuthClient against /channels/{channel}/messages.
+
+This file is the backend-proxied channel path and is entirely replaced by the native
+channel runtime in channels/runtime/dispatch.rs (see Section 5 for details).
+
+Delete:
+  - src/openhuman/channels/bus.rs
+  - src/openhuman/channels/bus_tests.rs (if it exists separately)
+
+Remove the ChannelInboundSubscriber registration from startup wiring.
+
+### 1.6  src/openhuman/inference/provider/openhuman_backend.rs
+OpenHumanBackendProvider routes chat via the backend /openai/v1/* proxy with session JWT.
+In the fork this is dead code — the factory's make_openhuman_backend() already returns
+an error pointing users to Settings → AI. Delete the module and update the factory:
+
+  - src/openhuman/inference/provider/openhuman_backend.rs
+
+In src/openhuman/inference/provider/factory.rs:
+  - Remove `use ... openhuman_backend::OpenHumanBackendProvider;`
+  - Remove the PROVIDER_OPENHUMAN = "openhuman" constant
+  - Replace make_openhuman_backend() with a direct anyhow::bail! that says:
+    "No LLM provider configured. Add a provider under Settings → AI."
+  - Remove all `"openhuman"` sentinel branches in provider_for_role()
+  - Remove the fallback `return make_openhuman_backend(config)` lines
+  - In src/openhuman/inference/provider/mod.rs remove `pub mod openhuman_backend;`
+
+### 1.7  src/openhuman/embeddings/cloud.rs
+OpenHumanCloudEmbedding routes POST /openai/v1/embeddings through the backend
+(Voyage-backed). Default embedder for fresh installs.
+
+Delete: src/openhuman/embeddings/cloud.rs
+
+Replacement: The local Ollama embedder (embeddings/ollama.rs or similar) becomes the
+default. Update the embedder factory (embeddings/mod.rs or wherever the default is
+selected) so that when no explicit embedding_provider is configured the app either:
+  a) Falls back to the Ollama embedder (if local AI is running), or
+  b) Returns a clear error: "No embedding provider configured. Enable local AI or set
+     memory.embedding_provider in config.toml."
+
+Do NOT silently fail on embed — the error must propagate so ingest jobs log a clear
+reason for skipping the row rather than inserting empty vectors.
+
+### 1.8  src/openhuman/memory/tree/score/embed/cloud.rs
+Wraps OpenHumanCloudEmbedding for the memory tree embedder trait.
+Delete after 1.7 is done.
+
+  - src/openhuman/memory/tree/score/embed/cloud.rs
+
+Update src/openhuman/memory/tree/score/embed/mod.rs to remove the cloud variant
+from the embedder selection logic.
+
+### 1.9  src/openhuman/integrations/client.rs  +  src/openhuman/integrations/types.rs (partial)
+IntegrationClient holds `backend_url` and `auth_token` and is the HTTP client for the
+backend Parallel search proxy. Only consumer: WebSearchTool.
+
+  - Delete or gut src/openhuman/integrations/client.rs
+  - Remove the BackendResponse / IntegrationPricing types that are backend-envelope-specific
+  - Keep any types that are reusable (SearchResultItem etc) if a replacement search is added
+
+### 1.10  src/openhuman/tools/impl/network/web_search.rs
+WebSearchTool routes search through the backend's Parallel integration proxy.
+With IntegrationClient gone this file is dead.
+
+Options (choose one):
+  a) Wire a direct search API (Brave Search API, SerpAPI, or Tavily) behind a user-configured
+     API key. Simplest: Brave's `https://api.search.brave.com/res/v1/web/search` requires
+     only a `X-Subscription-Token` header and returns JSON. Add `brave_search_api_key` to
+     the config and route through that when present.
+  b) Remove the tool entirely and deregister it from the orchestrator tools list.
+
+Do NOT leave a stub that silently returns empty results. If option (b) is chosen,
+remove the `web_search` / `gitbooks_search` tool registrations from
+src/openhuman/tools/orchestrator_tools.rs.
+
+---
+
+## Section 2 — Rust: the src/api/ module
+
+src/api/ is the entire backend HTTP layer. Once all Section 1 deletions are done,
+the remaining callers are:
+  - src/openhuman/channels/bus.rs           → gone (Section 1.5)
+  - src/openhuman/app_state/ops.rs          → see Section 3.1
+  - src/openhuman/config/ops.rs             → see Section 3.2
+  - src/openhuman/credentials/ops.rs        → see Section 3.3
+  - src/openhuman/embeddings/cloud.rs       → gone (Section 1.7)
+  - src/openhuman/inference/provider/openhuman_backend.rs → gone (Section 1.6)
+  - src/openhuman/integrations/client.rs    → gone (Section 1.9)
+  - src/openhuman/doctor/core.rs            → see Section 3.4
+  - src/openhuman/tools/impl/agent/onboarding_status.rs → see Section 3.5
+  - src/openhuman/meet_agent/brain.rs       → see Section 3.6
+
+When all of the above are cleaned up, delete the entire src/api/ directory:
+  - src/api/mod.rs
+  - src/api/config.rs       (DEFAULT_API_BASE_URL, BACKEND_URL env resolution)
+  - src/api/rest.rs         (BackendOAuthClient, 647 LOC)
+  - src/api/socket.rs       (websocket_url builder — gone with 1.4)
+  - src/api/jwt.rs          (thin re-export of credentials::session_support)
+  - src/api/models/         (backend socket event DTOs)
+
+Also remove `mod api;` from src/lib.rs (or src/main.rs, wherever it is declared).
+
+---
+
+## Section 3 — Rust: embedded backend usage in live modules
+
+### 3.1  src/openhuman/app_state/ops.rs
+Uses effective_backend_api_url + get_session_token to fetch the current user from
+GET /auth/me (user profile: id, email, display name). In the fork there is no backend
+session and no "current user" in the upstream sense.
+
+Replacement: return a local identity stub. The app_state snapshot should return:
+  { "user_id": null, "email": null, "display_name": "Local User", "source": "local" }
+or read an optional display name from config (if the user sets one). Remove the
+`api_url` and `session_token` dependency entirely from this module.
+
+### 3.2  src/openhuman/config/ops.rs
+Exposes `load_and_resolve_api_url()` RPC (openhuman.config_resolve_api_url) which
+returns the effective backend URL. The frontend backendUrl.ts calls this.
+
+With the backend gone, this RPC has no valid target. Remove:
+  - load_and_resolve_api_url() function
+  - The openhuman.config_resolve_api_url RPC registration from all.rs
+  - Remove api_url: Option<String> from ConfigSnapshot (the RPC response DTO)
+  - Remove api_url handling from ConfigUpdate (the RPC update DTO)
+  - Remove the api_url: Option<String> field from the Config struct itself
+    (src/openhuman/config/schema/types.rs)
+  - Remove the staging_env() / is_staging_app_env() helpers in api/config.rs that
+    gate on whether api_url points at staging (only useful for the backend concept)
+
+### 3.3  src/openhuman/credentials/ops.rs  +  session_support module
+The credentials module has a session_support submodule that provides get_session_token()
+and APP_SESSION_PROVIDER ("app-session"). These exist solely to read/write a backend JWT.
+
+After billing/referral/team/socket/channels-bus are gone there should be zero callers
+of get_session_token(). Verify with grep, then delete:
+  - src/openhuman/credentials/session_support.rs (or wherever APP_SESSION_PROVIDER lives)
+  - Remove the re-export from src/api/jwt.rs (which is being deleted anyway)
+  - Keep the rest of credentials/ — it is used by the native OAuth token store
+
+### 3.4  src/openhuman/doctor/core.rs
+Has a doctor check that calls crate::api::jwt::get_session_token to report whether
+the user has a backend session token. The doctor is a diagnostic tool.
+
+Replace: remove the session-token check entirely. Add instead a check that reports
+whether at least one cloud_providers entry is configured (so the doctor can flag
+"no LLM provider configured") and whether native OAuth tokens exist for Google/GitHub.
+
+### 3.5  src/openhuman/tools/impl/agent/onboarding_status.rs
+Has a `has_session_jwt` field populated by get_session_token(). In the fork there is
+no backend session.
+
+Replace: hardcode `has_session_jwt: false` (or rename the field to `has_api_key` and
+populate it by checking whether any cloud_providers entry has a non-empty API key).
+
+### 3.6  src/openhuman/meet_agent/brain.rs
+Uses crate::api — audit the specific usage (likely bearer auth for meet transcription
+or similar). If it hits the backend, stub or remove the dependency. If it is only using
+the URL resolver infrastructure, replace with local config read.
+
+### 3.7  src/openhuman/inference/voice/cloud_transcribe.rs
+Backend voice transcription proxy. Confirm whether this provider is registered in the
+voice factory (src/openhuman/voice/factory.rs). If wired in:
+  - Remove the cloud/backend transcription provider from the factory
+  - Ensure the local Whisper / system transcription paths remain reachable
+If it is already unreachable (factory never instantiates it), delete the file and remove
+its module declaration.
+
+### 3.8  src/openhuman/config/schema/cloud_providers.rs  +  load.rs
+Remove AuthStyle::OpenhumanJwt variant from the enum. This was the auth style used by
+the legacy "openhuman" sentinel cloud provider entry.
+
+In load.rs, remove migrate_openhuman_jwt_entries() — the migration function that rewrote
+OpenhumanJwt entries to Bearer on startup. Once the variant is gone from the enum,
+the serde deserializer will simply fail to parse old entries (they'll be dropped by the
+existing parse_config_with_recovery fallback). If a migration window is desired, convert
+existing OpenhumanJwt rows to a disabled/dummy state before removing the variant.
+
+### 3.9  src/openhuman/scheduler_gate/gate.rs
+is_signed_out() / set_signed_out() are backend-auth concepts: when the backend returned
+a 401, the app set signed_out=true to stop background LLM calls. In the single-user
+local fork, the user is never "signed out" in this sense.
+
+  - Make is_signed_out() always return false (a const fn or a one-liner)
+  - Remove set_signed_out() — it will have no callers once openhuman_backend.rs is gone
+  - Keep the rest of scheduler_gate (battery/CPU policy, permit system) — it is useful
+
+### 3.10  src/core/observability.rs
+Remove is_session_expired_error() and the session-expired string patterns:
+  - "SESSION_EXPIRED: backend session not active"
+  - "no backend session token; run auth_store_session first"
+  - "composio unavailable: no backend session token"
+These strings are used as Sentry de-duplication keys. With the backend gone, they will
+never be generated. Remove the checks and the corresponding test assertions.
+
+---
+
+## Section 4 — Frontend (TypeScript / React)
+
+### 4.1  Delete entirely — backend API service layer
+
+  app/src/services/backendUrl.ts              (getBackendUrl, clearBackendUrlCache)
+  app/src/services/__tests__/backendUrl.test.ts
+  app/src/services/apiClient.ts               (Bearer-authed HTTP client to backend)
+  app/src/services/api/authApi.ts             (sendEmailMagicLink, consumeLoginToken)
+  app/src/services/api/__tests__/authApi.test.ts
+  app/src/services/api/billingApi.ts
+  app/src/services/api/__tests__/billingApi.test.ts
+  app/src/services/api/creditsApi.ts
+  app/src/services/api/__tests__/creditsApi.test.ts
+  app/src/services/api/referralApi.ts
+  app/src/services/api/__tests__/referralApi.test.ts
+  app/src/services/api/teamApi.ts
+  app/src/services/api/__tests__/teamApi.test.ts
+  app/src/hooks/useUsageState.ts
+  app/src/hooks/useUsageState.test.ts
+  app/src/hooks/useBackendUrl.ts
+  app/src/hooks/useBackendUrl.test.ts
+
+### 4.2  Delete entirely — billing UI
+
+  app/src/components/settings/panels/billing/AutoRechargeSection.tsx
+  app/src/components/settings/panels/billing/BillingHistoryTab.tsx
+  app/src/components/settings/panels/billing/BillingPaymentsTab.tsx
+  app/src/components/settings/panels/billing/InferenceBudget.tsx
+  app/src/components/settings/panels/billing/PayAsYouGoCard.tsx
+  (and any index.ts barrel in billing/)
+
+### 4.3  Delete entirely — team management UI
+
+  app/src/components/settings/panels/TeamPanel.tsx
+  app/src/components/settings/panels/TeamManagementPanel.tsx
+  app/src/components/settings/panels/TeamMembersPanel.tsx
+  app/src/components/settings/panels/TeamInvitesPanel.tsx
+
+### 4.4  Delete entirely — referral / rewards UI
+
+  app/src/components/rewards/ReferralRewardsSection.tsx
+  app/src/components/rewards/__tests__/ReferralRewardsSection.test.tsx
+  app/src/components/rewards/RewardsCouponSection.tsx
+  app/src/components/rewards/__tests__/RewardsCouponSection.test.tsx
+
+### 4.5  Delete entirely — backend mascot / auth types
+
+  app/src/features/human/Mascot/backend/types.ts
+
+### 4.6  Partial edits — settings routes and nav
+
+  app/src/components/settings/Settings.tsx (or wherever routes are declared):
+    - Remove /settings/billing route and its lazy import
+    - Remove /settings/team route and its lazy import
+    - Remove /settings/rewards route (if it exists as a settings sub-route)
+
+  Remove /rewards route from AppRoutes.tsx if it is a top-level route.
+
+  Remove billing / team / rewards entries from any nav array (settings nav, sidebar, etc).
+
+### 4.7  Partial edits — AIPanel.tsx
+Remove the "Backend API URL" text input (the api_url override field) from Settings → AI.
+This field called the config_resolve_api_url RPC and allowed overriding the backend URL.
+With the backend gone, the field has no effect and the RPC no longer exists.
+
+### 4.8  Partial edits — config.ts  +  vite-env.d.ts
+  app/src/utils/config.ts:
+    - Remove BACKEND_URL export (reads VITE_BACKEND_URL env var)
+
+  app/src/vite-env.d.ts:
+    - Remove VITE_BACKEND_URL from the ImportMeta env type declaration
+
+### 4.9  Partial edits — tauriCommands/auth.ts
+Remove exchangeToken(backendUrl, token) — this is the backend token exchange flow.
+The invoke('exchange_token') Tauri command it calls was part of the upstream login flow.
+Keep getAuthState() if it is used by non-backend-auth code (verify callers first).
+
+### 4.10  Partial edits — Welcome.tsx
+app/src/pages/Welcome.tsx currently:
+  - Shows OAuth provider buttons (keep — these are native OAuth, not backend)
+  - Imports clearBackendUrlCache (remove that import once backendUrl.ts is deleted)
+  - Has logic around storeRpcUrl / clearStoredCoreMode — those are local core config,
+    keep them
+
+Once backendUrl.ts is deleted, remove the import and any call site that references it.
+
+### 4.11  Partial edits — socketService.ts
+app/src/services/socketService.ts already connects to the LOCAL core socket (not backend).
+The only backend dependency is the `import { getBackendUrl }` line used for some fallback.
+Once backendUrl.ts is deleted, remove that import and the `setBackend` dispatch in the
+connect flow if it was setting a backend URL in Redux.
+
+### 4.12  Partial edits — Home.tsx
+Remove the 'backend-only' status string and its corresponding translation key from
+app/src/pages/Home.tsx. This was a status mode shown when the local core was unreachable
+but the backend was available — that state no longer exists.
+
+### 4.13  Partial edits — About / Developer panels
+  app/src/components/settings/panels/AboutPanel.tsx:
+    - Remove backend version / environment display if present
+
+  app/src/components/settings/panels/__tests__/DeveloperOptionsPanel.test.tsx:
+    - Remove test assertions around BACKEND_URL or backend connectivity
+
+---
+
+## Section 5 — Native channel delivery (the architecture)
+
+This section explains why channels/bus.rs can be deleted cleanly and what the
+native delivery path already provides.
+
+### 5.1  Two separate inbound paths (only one is native)
+
+BACKEND SOCKET PATH (being deleted):
+  Backend socket → wss://api.tinyhumans.ai/socket.io
+    → emits DomainEvent::ChannelInboundMessage (global event bus)
+      → ChannelInboundSubscriber in channels/bus.rs handles it
+        → runs agent via web channel (start_chat)
+          → sends reply back via BackendOAuthClient /channels/{ch}/messages
+
+NATIVE RUNTIME PATH (stays):
+  channel.listen(mpsc::Sender<ChannelMessage>)  — per native provider
+    → run_message_dispatch_loop in channels/runtime/dispatch.rs
+      → agent pipeline runs with ctx.channels_by_name[channel]
+        → reply via channel.send() / channel.send_draft() / channel.typing()
+          → provider-native API directly (Telegram Bot API, Discord REST, etc.)
+
+These are completely separate code paths. channels/bus.rs only responds to events that
+the backend socket generates. Once the backend socket is gone, bus.rs is dead code.
+The native runtime (channels/runtime/) is unaffected.
+
+### 5.2  Native channel capabilities (current state)
+
+TELEGRAM (src/openhuman/channels/providers/telegram/)
+  Inbound:  channel_recv.rs — long-polling via getUpdates Bot API
+  Outbound: channel_ops.rs + channel_send.rs
+    ✓ send()         — sendMessage (chunked, with Markdown fallback)
+    ✓ send_draft()   — sendMessage (draft) then editMessageText for progressive updates
+    ✓ typing()       — sendChatAction(action="typing"), re-fires every 4s
+    ✓ reactions      — setMessageReaction
+    ✓ attachments    — sendPhoto, sendDocument, sendAudio, sendVideo
+  Auth:     bot_token stored in credentials under "telegram" provider key
+
+DISCORD (src/openhuman/channels/providers/discord/)
+  Inbound:  Gateway WebSocket (channel.rs listen()) — GUILDS + GUILD_MESSAGES intents
+  Outbound: channel.rs send()
+    ✓ send()         — POST /channels/{id}/messages  (Discord REST v10)
+    ✗ edit_message() — not yet implemented (PATCH /channels/{id}/messages/{id})
+    ✗ delete_message()— not yet implemented (DELETE /channels/{id}/messages/{id})
+    ✗ typing()       — not yet implemented (POST /channels/{id}/typing)
+  Auth:     bot_token stored in credentials under "discord" provider key
+
+SLACK (src/openhuman/channels/providers/slack.rs)
+  Check current state — Slack uses OAuth tokens, likely similar pattern.
+  The channels/runtime/startup.rs includes SlackChannel so it is wired in.
+
+EMAIL (src/openhuman/channels/providers/email_channel.rs)
+  Standalone SMTP/IMAP — no backend dependency.
+
+OTHERS (iMessage, WhatsApp, Signal, IRC, etc.)
+  All have local implementations. Audit each for any crate::api usage on a per-file
+  basis before deleting src/api/.
+
+WEB CHANNEL (channels/providers/web.rs)
+  In-app chat via local event bus. No external API. Not affected.
+
+### 5.3  Discord gaps to fill (before deleting channels/bus.rs)
+
+The bus.rs delete-blocker for Discord is that runtime/dispatch.rs calls
+channel.send_draft() and channel.typing() which are not yet implemented.
+The Channel trait has default no-op implementations that return Ok(None) / Ok(()).
+
+This is acceptable — the runtime falls back to atomic-final delivery (no progressive
+edit) when send_draft() returns Ok(None), and silently skips typing() when it no-ops.
+The user experience is slightly degraded (no "typing..." indicator, no streaming edit),
+but the message is delivered correctly via the existing send() implementation.
+
+TO IMPROVE Discord (not blocking, but recommended):
+
+In src/openhuman/channels/providers/discord/channel.rs, add:
+
+  async fn send_draft(&self, message: &SendMessage) -> anyhow::Result<Option<String>> {
+      // POST /channels/{channel_id}/messages → return message id
+      let url = format!(
+          "https://discord.com/api/v10/channels/{}/messages",
+          message.recipient
+      );
+      let body = json!({ "content": message.content });
+      let resp = self.http_client()
+          .post(&url)
+          .header("Authorization", format!("Bot {}", self.bot_token))
+          .json(&body)
+          .send().await?;
+      // extract .id from response JSON as the draft message id
+      let v: serde_json::Value = resp.json().await?;
+      Ok(v.get("id").and_then(|id| id.as_str()).map(String::from))
+  }
+
+  async fn edit(&self, recipient: &str, message_id: &str, text: &str) -> anyhow::Result<()> {
+      // PATCH /channels/{channel_id}/messages/{message_id}
+      let url = format!(
+          "https://discord.com/api/v10/channels/{}/messages/{}",
+          recipient, message_id
+      );
+      let body = json!({ "content": text });
+      self.http_client()
+          .patch(&url)
+          .header("Authorization", format!("Bot {}", self.bot_token))
+          .json(&body)
+          .send().await?;
+      Ok(())
+  }
+
+  async fn typing(&self, recipient: &str) -> anyhow::Result<()> {
+      // POST /channels/{channel_id}/typing  — no body
+      let url = format!(
+          "https://discord.com/api/v10/channels/{}/typing",
+          recipient
+      );
+      self.http_client()
+          .post(&url)
+          .header("Authorization", format!("Bot {}", self.bot_token))
+          .send().await?;
+      Ok(())
+  }
+
+Note: the Channel trait `edit()` and `typing()` default no-ops need to become
+override-able. Check whether they already exist on the trait; if not, add them
+with default no-op bodies so all existing providers compile unchanged.
+
+### 5.4  Telegram — no gaps
+
+Telegram is fully native. The only backend-facing code was in channels/bus.rs which
+routed typed messages through the backend relay. The native runtime already delivers
+messages via TelegramChannel::send() → sendMessage Bot API. Progressive edits
+(editMessageText), typing (sendChatAction), reactions (setMessageReaction), and
+attachment sending are all implemented. Nothing to add.
+
+The auth token (bot_token) is read from credentials at channel startup
+(channels/runtime/startup.rs constructs TelegramChannel with the stored token).
+
+### 5.5  Web channel — no change
+
+The web channel (in-app chat) uses an in-process broadcast bus. It never touched the
+backend for message delivery. No changes needed.
+
+### 5.6  Other channels audit checklist
+
+Before deleting src/api/, grep each channel provider for `crate::api`:
+
+  grep -rn "crate::api" src/openhuman/channels/providers/
+
+Any match that is not in bus.rs (already being deleted) represents a provider that
+still has a backend dependency. For each match, replace with the equivalent native
+API call following the Telegram / Discord patterns above.
+
+Expected result: zero matches outside bus.rs.
+
+---
+
+## Section 6 — Configuration and environment
+
+### 6.1  src/openhuman/config/schema/types.rs
+Remove:
+  - api_url: Option<String> field from the Config struct
+
+Update the Config::default() and serde defaults accordingly. Any test fixture that
+sets api_url will need updating.
+
+### 6.2  .env.example
+Remove:
+  - BACKEND_URL=...
+  - Any lines referencing staging-api.tinyhumans.ai
+
+### 6.3  app/.env.example
+Remove:
+  - VITE_BACKEND_URL=...
+
+### 6.4  deploy/self-hosted/docker-compose.yml
+This file references:
+  - image: ghcr.io/tinyhumansai/openhuman-core  (upstream image, not the fork)
+  - BACKEND_URL=https://api.tinyhumans.ai
+  - OPENHUMAN_APP_ENV=production
+
+The entire self-hosted server deployment concept belongs to the upstream multi-user
+product, not this single-user local desktop fork. Either delete the file entirely or
+replace it with a minimal compose that runs just the fork's binary against a local
+config (no BACKEND_URL).
+
+### 6.5  scripts/ci-secrets.example.json
+Remove any BACKEND_URL / VITE_BACKEND_URL entries. Keep Composio and OAuth keys.
+
+---
+
+## Section 7 — Tests
+
+### 7.1  E2E specs to remove or rewrite
+
+  app/test/e2e/specs/login-flow.spec.ts
+    Tests backend email / OAuth login. The fork has native OAuth only (no magic link,
+    no backend token exchange). Remove or rewrite to test the native OAuth deep-link flow.
+
+  app/test/e2e/specs/auth-access-control.spec.ts
+    Tests backend-auth gating (ProtectedRoute behaviour with/without token). In the fork
+    there is no app-login so the gating concept is different. Remove or replace with a
+    test that verifies the native OAuth grant flow enables features.
+
+  app/test/e2e/specs/gmail-flow.spec.ts
+  app/test/e2e/specs/notion-flow.spec.ts
+  app/test/e2e/specs/telegram-flow.spec.ts
+    These test Composio-backed integrations that required a backend session to authorize.
+    In direct Composio mode (fork default) or native OAuth, the flows differ.
+    Audit each: if the spec drives a flow that now works natively, rewrite it;
+    if the spec depends on backend auth scaffolding that no longer exists, remove it.
+
+  app/test/e2e/specs/channels-smoke.spec.ts
+    Check whether this tests the backend-relayed channel path or the native channel
+    runtime. If it tests login + channel connectivity via the backend, remove; if it
+    tests the native runtime, keep and update any backend setup steps.
+
+### 7.2  Unit tests — go with their modules
+Deleted Rust modules (billing, referral, team, socket, bus, openhuman_backend, etc.)
+carry their own test modules. They are deleted with the module.
+
+### 7.3  Mock server
+scripts/mock-api-core.mjs / scripts/mock-api-server.mjs stub the backend for Rust
+integration tests (json_rpc_e2e.rs uses it). Once backend-calling RPC methods are
+removed from all.rs, the mock server stubs for those methods can be removed.
+The mock server itself may still be useful for Composio direct-mode mocking — keep the
+framework, remove the backend-specific stubs (auth, billing, team, referral routes).
+
+### 7.4  tests/json_rpc_e2e.rs
+Remove:
+  - invoke_auth_store_session_missing_token_fails_validation test
+  - Any test that calls billing / team / referral RPC methods
+  - Any assertion against "no backend session token" error strings
+  - The BACKEND_URL env var setup helper if it only serves removed tests
+
+---
+
+## Section 8 — Binary files
+
+### 8.1  src/bin/inference_probe.rs
+Update the module-level doc comment that says:
+  "BACKEND_URL=https://staging-api.tinyhumans.ai ..."
+Replace with the fork's equivalent: configure a cloud_providers entry in config.toml.
+
+### 8.2  src/bin/slack_backfill.rs  +  gmail_backfill_3d.rs
+Both contain the string:
+  "No Composio client — user not signed in (backend session) and no direct-mode ..."
+Update to remove the "user not signed in (backend session)" phrase. Direct mode is the
+only mode in the fork; the error should read:
+  "No Composio client — set composio.api_key_provider in config.toml (direct mode)."
+
+---
+
+## Section 9 — Execution order
+
+Phase 1 — Delete Tier-1 modules (no cross-cutting changes needed):
+  billing/, referral/, team/, openhuman_backend.rs
+  Update src/openhuman/mod.rs + src/core/all.rs to remove their wiring.
+  Run: cargo check --manifest-path Cargo.toml
+
+Phase 2 — Delete socket + bus (after moving WebhookRouter):
+  Move WebhookRouter to a standalone global in webhooks/.
+  Delete src/openhuman/socket/, channels/bus.rs.
+  Delete src/api/socket.rs.
+  Update event bus startup and registration.
+  Run: cargo check
+
+Phase 3 — Clean embedded backend usage (Section 3):
+  app_state/ops.rs stub, scheduler_gate simplification, doctor cleanup,
+  credentials/session_support removal, config struct api_url removal,
+  observability error pattern cleanup.
+  Run: cargo check + cargo test
+
+Phase 4 — Delete remaining src/api/:
+  Verify zero callers with: grep -rn "crate::api" src/ | grep -v "^src/api/"
+  Then delete the module.
+  Run: cargo check + cargo test
+
+Phase 5 — Embeddings + web search:
+  Delete cloud embedder, update embedder factory default.
+  Delete IntegrationClient, resolve web_search tool (replace or remove).
+  Run: cargo check + cargo test
+
+Phase 6 — Frontend cleanup (Section 4):
+  Delete API service files, billing/team/rewards UI, update routes.
+  Run: pnpm typecheck + pnpm lint
+
+Phase 7 — Config / env / tests (Sections 6–8).
+
+Phase 8 — Discord native write methods (Section 5.3, non-blocking improvement).
+
+---
+
+## Completion criteria
+
+  cargo check --manifest-path Cargo.toml  → no errors
+  cargo check --manifest-path app/src-tauri/Cargo.toml  → no errors
+  pnpm workspace openhuman-app compile    → no errors
+  grep -r "api\.tinyhumans\.ai\|staging-api\|BackendOAuthClient\|get_session_token\|APP_SESSION_PROVIDER\|BACKEND_URL\|backendUrl" \
+       src/ app/src/ --include="*.rs" --include="*.ts" --include="*.tsx" \
+       | grep -v "\.plan\|\.md\|// \|test\|spec"
+  → zero hits
