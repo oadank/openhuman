@@ -130,6 +130,12 @@ struct InferenceTestEndpointParams {
 }
 
 #[derive(Debug, Deserialize)]
+struct InferenceListModelsRawParams {
+    endpoint: String,
+    api_key: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct InferenceApplyPresetParams {
     tier: String,
 }
@@ -141,6 +147,7 @@ pub fn all_controller_schemas() -> Vec<ControllerSchema> {
         schemas("update_model_settings"),
         schemas("update_local_settings"),
         schemas("list_models"),
+        schemas("list_models_raw"),
         schemas("test_provider"),
         schemas("test_endpoint"),
         schemas("device_profile"),
@@ -178,6 +185,10 @@ pub fn all_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: schemas("list_models"),
             handler: handle_inference_list_models,
+        },
+        RegisteredController {
+            schema: schemas("list_models_raw"),
+            handler: handle_inference_list_models_raw,
         },
         RegisteredController {
             schema: schemas("test_provider"),
@@ -378,6 +389,16 @@ pub fn schemas(function: &str) -> ControllerSchema {
                 optional_string("model", "Model id to use for the test chat completion."),
             ],
             outputs: vec![json_output("result", "Provider test result payload.")],
+        },
+        "list_models_raw" => ControllerSchema {
+            namespace: "inference",
+            function: "list_models_raw",
+            description: "Fetch the model list from a raw endpoint + API key before saving. No stored provider needed.",
+            inputs: vec![
+                required_string("endpoint", "Base URL of the OpenAI-compatible endpoint (e.g. https://api.openai.com/v1)."),
+                optional_string("api_key", "Bearer API key. Omit for auth-free local runtimes."),
+            ],
+            outputs: vec![json_output("models", "Provider model list payload.")],
         },
         "test_endpoint" => ControllerSchema {
             namespace: "inference",
@@ -718,6 +739,19 @@ fn handle_inference_test_provider(params: Map<String, Value>) -> ControllerFutur
             crate::openhuman::inference::rpc::inference_test_provider(
                 &request.provider_id,
                 request.model.as_deref(),
+            )
+            .await?,
+        )
+    })
+}
+
+fn handle_inference_list_models_raw(params: Map<String, Value>) -> ControllerFuture {
+    Box::pin(async move {
+        let request = deserialize_params::<InferenceListModelsRawParams>(params)?;
+        to_json(
+            crate::openhuman::inference::rpc::inference_list_models_raw(
+                &request.endpoint,
+                request.api_key.as_deref(),
             )
             .await?,
         )

@@ -19,6 +19,7 @@ import {
   clearCloudProviderKey,
   type CloudProviderView,
   flushCloudProviders,
+  listModelsRaw,
   listProviderModels,
   loadAISettings,
   loadLocalProviderSnapshot,
@@ -2226,6 +2227,9 @@ const CloudProviderEditor = ({
   const [endpoint, setEndpoint] = useState(initial?.endpoint ?? defaultEndpointFor(defaultSlug));
   const [apiKey, setApiKey] = useState('');
   const [defaultModel, setDefaultModel] = useState(initialDefaultModel ?? '');
+  const [modelList, setModelList] = useState<ModelInfo[]>([]);
+  const [modelListLoading, setModelListLoading] = useState(false);
+  const [modelListError, setModelListError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<{
     phase: 'running' | 'success' | 'error';
@@ -2233,6 +2237,24 @@ const CloudProviderEditor = ({
   } | null>(null);
   const isOpenHuman = slug === 'openhuman';
   const hasExistingKey = (initial?.maskedKey ?? '').startsWith('••••');
+
+  const fetchModels = async () => {
+    const ep = endpoint.trim();
+    if (!ep) return;
+    setModelListLoading(true);
+    setModelListError(null);
+    try {
+      const models = await listModelsRaw(ep, apiKey.trim());
+      setModelList(models);
+      if (models.length > 0 && !defaultModel) {
+        setDefaultModel(models[0].id);
+      }
+    } catch (err) {
+      setModelListError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setModelListLoading(false);
+    }
+  };
 
   const runTest = async () => {
     const model = defaultModel.trim();
@@ -2316,15 +2338,46 @@ const CloudProviderEditor = ({
             />
           </div>
           <div>
-            <label className="text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:text-neutral-400">
-              Default model
-            </label>
-            <input
-              value={defaultModel}
-              onChange={e => setDefaultModel(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 placeholder:text-stone-400 dark:placeholder:text-neutral-500 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
-              placeholder="e.g. gpt-4o, claude-sonnet-4-6"
-            />
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:text-neutral-400">
+                Default model
+              </label>
+              <button
+                type="button"
+                onClick={() => void fetchModels()}
+                disabled={!endpoint.trim() || modelListLoading}
+                className="text-[10px] font-medium text-primary-600 dark:text-primary-400 hover:underline disabled:opacity-40 disabled:cursor-not-allowed">
+                {modelListLoading ? 'Fetching…' : 'Fetch from endpoint'}
+              </button>
+            </div>
+            {modelListError && (
+              <p className="mt-1 text-[11px] text-red-600 dark:text-red-300 font-mono break-all">
+                {modelListError}
+              </p>
+            )}
+            {modelList.length > 0 ? (
+              <select
+                value={defaultModel}
+                onChange={e => setDefaultModel(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200">
+                {!defaultModel && <option value="">Select a model…</option>}
+                {defaultModel && !modelList.some(m => m.id === defaultModel) && (
+                  <option value={defaultModel}>{defaultModel}</option>
+                )}
+                {modelList.map(m => (
+                  <option key={m.id} value={m.id}>
+                    {m.id}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={defaultModel}
+                onChange={e => setDefaultModel(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 placeholder:text-stone-400 dark:placeholder:text-neutral-500 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
+                placeholder="e.g. gpt-4o, claude-sonnet-4-6"
+              />
+            )}
           </div>
           {!isOpenHuman && (
             <div>

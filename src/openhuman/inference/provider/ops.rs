@@ -370,6 +370,116 @@ pub async fn test_raw_endpoint(
     ))
 }
 
+pub async fn list_raw_endpoint_models(
+    endpoint: &str,
+    api_key: Option<&str>,
+) -> Result<crate::rpc::RpcOutcome<serde_json::Value>, String> {
+    let endpoint = endpoint.trim().trim_end_matches('/');
+    if endpoint.is_empty() {
+        return Err("endpoint must not be empty".to_string());
+    }
+
+    let models_url = format!("{}/models", endpoint);
+    let parsed_url = reqwest::Url::parse(&models_url).map_err(|e| {
+        format!("endpoint '{}' is not a valid URL ({})", endpoint, e)
+    })?;
+
+    log::debug!(
+        "[providers][list_models_raw] fetching url={}",
+        crate::openhuman::inference::provider::factory::redact_endpoint(&models_url)
+    );
+
+    let is_loopback = matches!(
+        parsed_url.host_str(),
+        Some("127.0.0.1") | Some("::1") | Some("localhost")
+    );
+    let client = if is_loopback {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("[providers][list_models_raw] failed to build client: {e}"))?
+    } else {
+        crate::openhuman::config::build_runtime_proxy_client_with_timeouts(
+            "providers.list_models_raw",
+            30,
+            10,
+        )
+    };
+
+    let mut request = client.get(&models_url);
+    let key = api_key.map(str::trim).filter(|k| !k.is_empty());
+    if let Some(k) = key {
+        request = request.header("Authorization", format!("Bearer {}", k));
+    }
+
+    let response = request.send().await.map_err(|e| {
+        use std::error::Error;
+        let mut chain = format!("{e}");
+        let mut src: Option<&dyn std::error::Error> = e.source();
+        while let Some(inner) = src {
+            chain.push_str(" -> ");
+            chain.push_str(&format!("{inner}"));
+            src = inner.source();
+        }
+        format!(
+            "[providers][list_models_raw] request to {} failed: {}",
+            crate::openhuman::inference::provider::factory::redact_endpoint(&models_url),
+            chain
+        )
+    })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let sanitized = sanitize_api_error(&body);
+        let truncated = crate::openhuman::util::truncate_with_ellipsis(&sanitized, 300);
+        return Err(format!("provider returned {}: {}", status.as_u16(), truncated));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("[providers][list_models_raw] failed to parse JSON: {}", e))?;
+
+    let data = body
+        .get("data")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let models: Vec<ModelInfo> = data
+        .iter()
+        .filter_map(|item| {
+            let id = item.get("id")?.as_str()?.to_string();
+            let owned_by = item
+                .get("owned_by")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let context_window = item
+                .get("context_length")
+                .or_else(|| item.get("context_window"))
+                .and_then(|v| v.as_u64());
+            Some(ModelInfo {
+                id,
+                owned_by,
+                context_window,
+            })
+        })
+        .collect();
+
+    log::info!(
+        "[providers][list_models_raw] fetched {} models from {}",
+        models.len(),
+        crate::openhuman::inference::provider::factory::redact_endpoint(endpoint)
+    );
+
+    Ok(crate::rpc::RpcOutcome::new(
+        serde_json::json!({ "models": models }),
+        vec![format!("fetched {} models", models.len())],
+    ))
+}
+
 fn find_provider_entry<'a>(
     config: &'a crate::openhuman::config::Config,
     provider_id: &str,

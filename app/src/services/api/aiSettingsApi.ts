@@ -369,6 +369,20 @@ export async function testEndpoint(
   return res.result;
 }
 
+export async function listModelsRaw(endpoint: string, apiKey: string): Promise<ModelInfo[]> {
+  if (!isTauri()) {
+    return [];
+  }
+  const res = await callCoreRpc<{ result: { models: ModelInfo[] } }>({
+    method: 'openhuman.inference_list_models_raw',
+    params: {
+      endpoint,
+      api_key: apiKey || undefined,
+    },
+  });
+  return res?.result?.models ?? [];
+}
+
 // ─── Local provider façade (Ollama install / detect / model manage) ───────
 
 /** Snapshot of the Ollama daemon + installed-model state for the AI panel. */
