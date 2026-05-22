@@ -1834,13 +1834,21 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                       }}
                     />
                     {enabled && existing ? (
-                      <button
-                        type="button"
-                        onClick={() => void runProviderTest(existing)}
-                        disabled={testState?.phase === 'running'}
-                        className="rounded-full border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 disabled:cursor-wait disabled:opacity-60">
-                        {testState?.phase === 'running' ? 'Testing' : 'Test'}
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setEditing(existing)}
+                          className="rounded-full border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60">
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void runProviderTest(existing)}
+                          disabled={testState?.phase === 'running'}
+                          className="rounded-full border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 disabled:cursor-wait disabled:opacity-60">
+                          {testState?.phase === 'running' ? 'Testing' : 'Test'}
+                        </button>
+                      </>
                     ) : null}
                     {testState ? (
                       <span
@@ -1869,51 +1877,60 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                 // Use a styled chip directly for local runtimes — they have
                 // non-standard tones not in BUILTIN_PROVIDER_META.
                 return (
-                  <div
-                    key={localKind}
-                    className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ring-1 transition-colors ${tone}`}>
-                    <span>{label}</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={enabled}
-                      aria-label={`${enabled ? 'Disconnect' : 'Connect'} ${label}`}
-                      disabled={busyAction === `toggle-${localKind}`}
-                      onClick={() => {
-                        if (enabled && existing) {
-                          const remaining = draft.cloudProviders.filter(
-                            cp => cp.id !== existing.id
-                          );
-                          const nextRouting = Object.fromEntries(
-                            Object.entries(draft.routing).map(([wid, ref]) => [
-                              wid,
-                              ref.kind === 'cloud' && ref.providerSlug === localKind
+                  <div key={localKind} className="inline-flex items-center gap-1.5">
+                    <div
+                      className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium ring-1 transition-colors ${tone}`}>
+                      <span>{label}</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={enabled}
+                        aria-label={`${enabled ? 'Disconnect' : 'Connect'} ${label}`}
+                        disabled={busyAction === `toggle-${localKind}`}
+                        onClick={() => {
+                          if (enabled && existing) {
+                            const remaining = draft.cloudProviders.filter(
+                              cp => cp.id !== existing.id
+                            );
+                            const nextRouting = Object.fromEntries(
+                              Object.entries(draft.routing).map(([wid, ref]) => [
+                                wid,
+                                ref.kind === 'cloud' && ref.providerSlug === localKind
+                                  ? ({ kind: 'openhuman' } as const)
+                                  : ref,
+                              ])
+                            ) as typeof draft.routing;
+                            const chatDefault =
+                              draft.chatDefault.kind === 'cloud' &&
+                              draft.chatDefault.providerSlug === localKind
                                 ? ({ kind: 'openhuman' } as const)
-                                : ref,
-                            ])
-                          ) as typeof draft.routing;
-                          const chatDefault =
-                            draft.chatDefault.kind === 'cloud' &&
-                            draft.chatDefault.providerSlug === localKind
-                              ? ({ kind: 'openhuman' } as const)
-                              : draft.chatDefault;
-                          setDraft({
-                            ...draft,
-                            cloudProviders: remaining,
-                            chatDefault,
-                            routing: nextRouting,
-                          });
-                        } else {
-                          setKeyDialogFor(localKind);
-                          setPendingLocalLabel(label);
-                        }
-                      }}
-                      className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors disabled:cursor-wait disabled:opacity-60 ${enabled ? 'bg-primary-500' : 'bg-stone-300 dark:bg-neutral-700'}`}>
-                      <span
-                        aria-hidden
-                        className={`inline-block h-3 w-3 transform rounded-full bg-white dark:bg-neutral-900 shadow transition-transform ${enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`}
-                      />
-                    </button>
+                                : draft.chatDefault;
+                            setDraft({
+                              ...draft,
+                              cloudProviders: remaining,
+                              chatDefault,
+                              routing: nextRouting,
+                            });
+                          } else {
+                            setKeyDialogFor(localKind);
+                            setPendingLocalLabel(label);
+                          }
+                        }}
+                        className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors disabled:cursor-wait disabled:opacity-60 ${enabled ? 'bg-primary-500' : 'bg-stone-300 dark:bg-neutral-700'}`}>
+                        <span
+                          aria-hidden
+                          className={`inline-block h-3 w-3 transform rounded-full bg-white dark:bg-neutral-900 shadow transition-transform ${enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`}
+                        />
+                      </button>
+                    </div>
+                    {enabled && existing ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditing(existing)}
+                        className="rounded-full border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60">
+                        Edit
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}
@@ -2019,6 +2036,13 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
       {editing && (
         <CloudProviderEditor
           initial={editing === 'new' ? null : editing}
+          initialDefaultModel={
+            editing !== 'new' &&
+            draft.chatDefault.kind === 'cloud' &&
+            draft.chatDefault.providerSlug === editing.slug
+              ? draft.chatDefault.model
+              : undefined
+          }
           existingSlugs={draft.cloudProviders
             .filter(p => p.id !== (editing === 'new' ? '' : editing.id))
             .map(p => p.slug)}
@@ -2176,12 +2200,14 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
 const CloudProviderEditor = ({
   initial,
   existingSlugs,
+  initialDefaultModel,
   onClose,
   onSubmit,
   onClearKey,
 }: {
   initial: CloudProvider | null;
   existingSlugs: string[];
+  initialDefaultModel?: string;
   onClose: () => void;
   onSubmit: (next: CloudProvider, apiKey: string, defaultModel: string) => Promise<void> | void;
   onClearKey: (slug: string) => Promise<void> | void;
@@ -2199,7 +2225,7 @@ const CloudProviderEditor = ({
   );
   const [endpoint, setEndpoint] = useState(initial?.endpoint ?? defaultEndpointFor(defaultSlug));
   const [apiKey, setApiKey] = useState('');
-  const [defaultModel, setDefaultModel] = useState('');
+  const [defaultModel, setDefaultModel] = useState(initialDefaultModel ?? '');
   const [saving, setSaving] = useState(false);
   const [testState, setTestState] = useState<{
     phase: 'running' | 'success' | 'error';
