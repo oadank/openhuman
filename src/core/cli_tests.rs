@@ -97,17 +97,17 @@ fn load_dotenv_for_cli_reads_cwd_dotenv_without_overwriting_existing_env() {
     let env_path = tmp.path().join(".env");
     std::fs::write(
         &env_path,
-        "BACKEND_URL=https://staging-api.example.test\nOPENHUMAN_APP_ENV=staging\n",
+        "OPENHUMAN_DOTENV_TEST_URL=https://example.test\nOPENHUMAN_APP_ENV=staging\n",
     )
     .expect("write .env");
 
     let original_dir = std::env::current_dir().expect("current dir");
-    let prior_backend = std::env::var("BACKEND_URL").ok();
+    let prior_test_url = std::env::var("OPENHUMAN_DOTENV_TEST_URL").ok();
     let prior_app_env = std::env::var("OPENHUMAN_APP_ENV").ok();
     let prior_dotenv_path = std::env::var("OPENHUMAN_DOTENV_PATH").ok();
 
     unsafe {
-        std::env::remove_var("BACKEND_URL");
+        std::env::remove_var("OPENHUMAN_DOTENV_TEST_URL");
         std::env::set_var("OPENHUMAN_APP_ENV", "production");
         std::env::remove_var("OPENHUMAN_DOTENV_PATH");
     }
@@ -115,14 +115,14 @@ fn load_dotenv_for_cli_reads_cwd_dotenv_without_overwriting_existing_env() {
 
     let result = load_dotenv_for_cli();
 
-    let loaded_backend = std::env::var("BACKEND_URL").ok();
+    let loaded_test_url = std::env::var("OPENHUMAN_DOTENV_TEST_URL").ok();
     let loaded_app_env = std::env::var("OPENHUMAN_APP_ENV").ok();
 
     std::env::set_current_dir(&original_dir).expect("restore current dir");
     unsafe {
-        match prior_backend {
-            Some(value) => std::env::set_var("BACKEND_URL", value),
-            None => std::env::remove_var("BACKEND_URL"),
+        match prior_test_url {
+            Some(value) => std::env::set_var("OPENHUMAN_DOTENV_TEST_URL", value),
+            None => std::env::remove_var("OPENHUMAN_DOTENV_TEST_URL"),
         }
         match prior_app_env {
             Some(value) => std::env::set_var("OPENHUMAN_APP_ENV", value),
@@ -136,8 +136,8 @@ fn load_dotenv_for_cli_reads_cwd_dotenv_without_overwriting_existing_env() {
 
     result.expect("dotenv load should succeed");
     assert_eq!(
-        loaded_backend.as_deref(),
-        Some("https://staging-api.example.test")
+        loaded_test_url.as_deref(),
+        Some("https://example.test")
     );
     assert_eq!(loaded_app_env.as_deref(), Some("production"));
 }

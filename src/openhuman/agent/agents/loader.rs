@@ -668,19 +668,9 @@ mod tests {
                     tools.iter().any(|t| t == "ask_user_clarification"),
                     "crypto_agent needs ask_user_clarification to gate write ops"
                 );
-                // Market grounding + context helpers. Pin the full set so a
-                // TOML edit that silently drops `stock_quote`,
-                // `stock_exchange_rate`, `memory_recall`, or `current_time`
-                // gets caught here — the agent's quote-before-execute
-                // discipline and "ground in user preferences before re-asking"
-                // behaviour both depend on these being present.
-                for required in [
-                    "stock_quote",
-                    "stock_exchange_rate",
-                    "stock_crypto_series",
-                    "memory_recall",
-                    "current_time",
-                ] {
+                // Context helpers. Pin the set so a TOML edit that silently
+                // drops `memory_recall` or `current_time` gets caught here.
+                for required in ["memory_recall", "current_time"] {
                     assert!(
                         tools.iter().any(|t| t == required),
                         "crypto_agent needs supporting tool `{required}`"

@@ -50,7 +50,7 @@ API key. Token storage stays on the existing on-disk-encrypted
 - Login UI and login deep-link surface (single-user local desktop).
 - The privacy-sensitive Composio backend surface (stubbed).
 - `OPENHUMAN_NATIVE_OAUTH` env-var gate (now always on).
-- `BackendOAuthClient::validate_session_token` (unused).
+- Legacy backend session-token validation helper.
 - Billing menu tile from Settings.
 - `sessionToken` gate on the bottom tab bar.
 
@@ -185,10 +185,10 @@ and Composio direct-mode took over from the deleted backend proxy.
   configured (previously silently routed to OpenHumanBackendProvider →
   `SESSION_EXPIRED`). Memory-tree `CloudChatProvider` removed in favour
   of the workload factory.
-- **Existing `OpenhumanJwt` rows** in `cloud_providers` are migrated to
+- **Existing legacy backend-JWT rows** in `cloud_providers` are migrated to
   `Bearer` with an empty key on config load — the user re-adds their own
   API key under Settings → AI, but the misleading `SESSION_EXPIRED`
-  error path is closed. Migration that minted new `OpenhumanJwt` entries
+  error path is closed. Migration that minted new legacy backend-JWT entries
   is gone.
 
 ### Added (later in the day — skill execution + namespace-graph LLM)

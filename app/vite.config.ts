@@ -109,12 +109,10 @@ export default defineConfig(async () => ({
   publicDir: "../public",
   // Read env files from the repo root (not `app/src/`, which is the vite
   // `root` and would be the default `envDir`). Lets `pnpm dev:app` pick up
-  // `VITE_BACKEND_URL` / `VITE_OPENHUMAN_APP_ENV` from the same root `.env`
-  // the Rust shell uses, instead of needing a separate `app/.env.local`.
+  // `VITE_OPENHUMAN_APP_ENV` from the same root `.env` the Rust shell uses,
+  // instead of needing a separate `app/.env.local`.
   // Without this, `import.meta.env.VITE_*` is empty in dev (Vite does not
-  // inherit `process.env` for VITE_-prefixed vars), so `BACKEND_URL` falls
-  // through to the production fallback in `src/utils/config.ts` even when
-  // the shell exports staging URLs.
+  // inherit `process.env` for VITE_-prefixed vars).
   envDir: resolve(__dirname, ".."),
   build: {
     outDir: isWebTarget ? "../dist-web" : "../dist",

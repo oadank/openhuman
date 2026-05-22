@@ -41,10 +41,9 @@ use async_trait::async_trait;
 use log::debug;
 use serde::{Deserialize, Serialize};
 
-use super::cloud_transcribe::{transcribe_cloud, CloudTranscribeOptions, CloudTranscribeResult};
 use super::local_speech::{synthesize_piper, PiperOptions};
 use super::local_transcribe::{transcribe_whisper, WhisperTranscribeOptions};
-use super::reply_speech::{synthesize_reply, ReplySpeechOptions, ReplySpeechResult};
+use super::reply_speech::ReplySpeechResult;
 use super::system_speech::{synthesize_system_say, SystemSpeechOptions};
 use crate::openhuman::config::Config;
 use crate::openhuman::inference::voice::kokoro_speech::{synthesize_kokoro, KokoroOptions};
@@ -111,7 +110,7 @@ pub trait TtsProvider: Send + Sync {
 // Cloud STT
 // ---------------------------------------------------------------------------
 
-/// Cloud STT — wraps [`transcribe_cloud`]. Stateless; cheap to construct.
+/// Removed cloud STT placeholder.
 pub struct CloudSttProvider {
     model: String,
 }
@@ -143,21 +142,8 @@ impl SttProvider for CloudSttProvider {
             self.model,
             audio_base64.len()
         );
-        let opts = CloudTranscribeOptions {
-            model: Some(self.model.clone()),
-            language: language.map(str::to_string),
-            mime_type: mime_type.map(str::to_string),
-            file_name: file_name.map(str::to_string),
-        };
-        let outcome = transcribe_cloud(config, audio_base64, &opts).await?;
-        let CloudTranscribeResult { text } = outcome.value;
-        Ok(RpcOutcome::single_log(
-            SttResult {
-                text,
-                provider: "cloud".to_string(),
-            },
-            "voice-factory: cloud STT completed",
-        ))
+        let _ = (config, audio_base64, mime_type, file_name, language);
+        Err("cloud STT is unavailable in this build; use provider `whisper`".to_string())
     }
 }
 
@@ -217,7 +203,7 @@ impl SttProvider for WhisperSttProvider {
 // Cloud TTS
 // ---------------------------------------------------------------------------
 
-/// Cloud TTS — wraps [`synthesize_reply`] (backend ElevenLabs proxy).
+/// Removed cloud TTS placeholder.
 pub struct CloudTtsProvider {
     voice: Option<String>,
 }
@@ -240,22 +226,8 @@ impl TtsProvider for CloudTtsProvider {
         text: &str,
         voice: Option<&str>,
     ) -> Result<RpcOutcome<ReplySpeechResult>, String> {
-        let resolved_voice = voice
-            .map(str::to_string)
-            .or_else(|| self.voice.clone())
-            .filter(|s| !s.trim().is_empty());
-        debug!(
-            "{LOG_PREFIX} cloud TTS dispatch voice={} chars={}",
-            resolved_voice.as_deref().unwrap_or("<default>"),
-            text.len()
-        );
-        let opts = ReplySpeechOptions {
-            voice_id: resolved_voice,
-            model_id: None,
-            output_format: None,
-            voice_settings: None,
-        };
-        synthesize_reply(config, text, &opts).await
+        let _ = (config, text, voice);
+        Err("cloud TTS is unavailable in this build; use provider `kokoro`, `piper`, or `system`".to_string())
     }
 }
 
@@ -427,8 +399,6 @@ impl TtsProvider for SystemTtsProvider {
 /// Creates a speech-to-text provider based on the specified name and model.
 ///
 /// Supported provider names:
-/// - `"cloud"` → backend Whisper proxy — default, preferred for laptops
-///   without local models
 /// - `"whisper"` → local whisper.cpp via `WHISPER_BIN` (or in-process
 ///   `whisper-rs` when configured)
 ///
@@ -451,12 +421,12 @@ pub fn create_stt_provider(
         model
     };
     match provider.trim() {
-        "cloud" => Ok(Box::new(CloudSttProvider::new(
-            super::cloud_transcribe_default_model(),
-        ))),
+        "cloud" => Err(anyhow::anyhow!(
+            "cloud STT is unavailable in this build. Supported: \"whisper\""
+        )),
         "whisper" => Ok(Box::new(WhisperSttProvider::new(model))),
         unknown => Err(anyhow::anyhow!(
-            "unknown STT provider: \"{unknown}\". Supported: \"cloud\", \"whisper\""
+            "unknown STT provider: \"{unknown}\". Supported: \"whisper\""
         )),
     }
 }
@@ -464,7 +434,6 @@ pub fn create_stt_provider(
 /// Creates a text-to-speech provider based on the specified name and voice.
 ///
 /// Supported provider names:
-/// - `"cloud"` → backend ElevenLabs proxy with viseme alignment
 /// - `"piper"` → local Piper subprocess via `PIPER_BIN`
 /// - `"kokoro"` → local OpenAI-compatible TTS server (Kokoro on
 ///   kokoro-fastapi / mlx-audio / LM Studio audio mode). Endpoint URL,
@@ -485,11 +454,9 @@ pub fn create_tts_provider(
         trimmed_voice
     };
     match provider.trim() {
-        "cloud" => Ok(Box::new(CloudTtsProvider::new(if trimmed_voice.is_empty() {
-            None
-        } else {
-            Some(trimmed_voice.to_string())
-        }))),
+        "cloud" => Err(anyhow::anyhow!(
+            "cloud TTS is unavailable in this build. Supported: \"piper\", \"kokoro\", \"system\""
+        )),
         "piper" => Ok(Box::new(PiperTtsProvider::new(piper_voice))),
         "kokoro" => {
             // Kokoro uses its own voice-id namespace: a lowercase
@@ -539,7 +506,7 @@ pub fn create_tts_provider(
             },
         ))),
         unknown => Err(anyhow::anyhow!(
-            "unknown TTS provider: \"{unknown}\". Supported: \"cloud\", \"piper\", \"kokoro\", \"system\""
+            "unknown TTS provider: \"{unknown}\". Supported: \"piper\", \"kokoro\", \"system\""
         )),
     }
 }
@@ -597,17 +564,15 @@ pub const WHISPER_MODEL_PRESETS: &[(&str, &str)] = &[
     ("large-v3-turbo", "Large v3 Turbo (1.5 GB, best accuracy)"),
 ];
 
-/// Returns a thread-safe default STT provider (cloud). Used by callers that
+/// Returns a thread-safe default STT provider. Used by callers that
 /// can't easily plumb a `Config` reference but still need a sensible default.
 pub fn default_stt_provider() -> Arc<dyn SttProvider> {
-    Arc::new(CloudSttProvider::new(
-        super::cloud_transcribe_default_model(),
-    ))
+    Arc::new(WhisperSttProvider::new(DEFAULT_WHISPER_MODEL))
 }
 
-/// Returns a thread-safe default TTS provider (cloud).
+/// Returns a thread-safe default TTS provider.
 pub fn default_tts_provider() -> Arc<dyn TtsProvider> {
-    Arc::new(CloudTtsProvider::new(None))
+    Arc::new(PiperTtsProvider::new(DEFAULT_PIPER_VOICE))
 }
 
 // ---------------------------------------------------------------------------

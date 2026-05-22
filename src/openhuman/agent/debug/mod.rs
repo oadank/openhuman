@@ -275,81 +275,35 @@ async fn render_integrations_agent(config: &Config, toolkit: &str) -> Result<Dum
             )
         })?;
 
-    // Resolve the live client kind via the mode-aware factory so a
-    // direct-mode user can still render the prompt even without a
-    // backend session (#1710 Wave 2). Backend mode keeps the existing
-    // `fetch_toolkit_actions` round-trip; direct mode skips the
-    // refresh (no backend allowlist to consult) and keeps the cached
-    // catalogue, mirroring `ComposioListToolsTool`'s short-circuit.
     use crate::openhuman::composio::client::{create_composio_client, ComposioClientKind};
-    let client_kind = create_composio_client(config)
+    let ComposioClientKind::Direct(direct) = create_composio_client(config)
         .map_err(|e| anyhow!("composio client unavailable — is the user signed in? ({e})"))?;
 
-    // Refresh the action catalogue for this toolkit at prompt-generation
-    // time so the dump reflects the **current** backend state rather
-    // than the session-start bulk fetch's snapshot (which can return an
-    // empty list for some toolkits even when the per-toolkit endpoint
-    // returns actions). Mirrors subagent_runner's typed-mode fallback:
-    // an empty fresh list or a network error keeps the cached catalogue
-    // rather than blanking it.
-    match &client_kind {
-        ComposioClientKind::Backend(composio_client) => {
-            match crate::openhuman::composio::fetch_toolkit_actions(
-                composio_client,
-                &integration.toolkit,
-            )
-            .await
-            {
-                Ok(actions) if !actions.is_empty() => {
-                    integration.tools = actions;
-                }
-                Ok(_) => {
-                    log::debug!(
-                    "[agent::debug] fresh list_tools for `{}` returned empty; keeping cached catalogue ({} actions)",
-                    integration.toolkit,
-                    integration.tools.len()
-                );
-                }
-                Err(e) => {
-                    log::warn!(
-                    "[agent::debug] fresh list_tools for `{}` failed ({e}); keeping cached catalogue ({} actions)",
-                    integration.toolkit,
-                    integration.tools.len()
-                );
-                }
-            }
+    match crate::openhuman::composio::fetch_direct_toolkit_actions(&direct, &integration.toolkit)
+        .await
+    {
+        Ok(actions) if !actions.is_empty() => {
+            log::info!(
+                "[agent::debug][composio-direct] refreshed direct catalogue for `{}` ({} actions; cached was {})",
+                integration.toolkit,
+                actions.len(),
+                integration.tools.len()
+            );
+            integration.tools = actions;
         }
-        ComposioClientKind::Direct(direct) => {
-            match crate::openhuman::composio::fetch_direct_toolkit_actions(
-                direct,
-                &integration.toolkit,
-            )
-            .await
-            {
-                Ok(actions) if !actions.is_empty() => {
-                    log::info!(
-                        "[agent::debug][composio-direct] refreshed direct catalogue for `{}` ({} actions; cached was {})",
-                        integration.toolkit,
-                        actions.len(),
-                        integration.tools.len()
-                    );
-                    integration.tools = actions;
-                }
-                Ok(_) => {
-                    log::info!(
-                        "[agent::debug][composio-direct] direct refresh for `{}` returned empty; keeping cached catalogue ({} actions)",
-                        integration.toolkit,
-                        integration.tools.len()
-                    );
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[agent::debug][composio-direct] direct refresh for `{}` failed ({e}); keeping cached catalogue ({} actions)",
-                        integration.toolkit,
-                        integration.tools.len()
-                    );
-                }
-            }
+        Ok(_) => {
+            log::info!(
+                "[agent::debug][composio-direct] direct refresh for `{}` returned empty; keeping cached catalogue ({} actions)",
+                integration.toolkit,
+                integration.tools.len()
+            );
+        }
+        Err(e) => {
+            log::warn!(
+                "[agent::debug][composio-direct] direct refresh for `{}` failed ({e}); keeping cached catalogue ({} actions)",
+                integration.toolkit,
+                integration.tools.len()
+            );
         }
     }
 

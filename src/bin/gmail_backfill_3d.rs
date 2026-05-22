@@ -123,17 +123,9 @@ async fn main() -> Result<()> {
         wipe_memory_tree_state(&config)?;
     }
 
-    // Resolve through the mode-aware factory so the backfill runs in
-    // EITHER backend mode (legacy JWT-driven path) OR direct mode (BYO
-    // Composio API key on the user's personal tenant) — #1710 Wave 2.
-    // Pre-fix this binary was hard-wired to backend mode via
-    // `build_composio_client`, so a direct-mode user couldn't run a
-    // gmail backfill even with a healthy personal connection.
-    let client_kind = create_composio_client(&config).map_err(|e| {
+    let ComposioClientKind::Direct(direct) = create_composio_client(&config).map_err(|e| {
         anyhow::anyhow!(
-            "No Composio client — user not signed in (backend session) and no direct-mode \
-             API key configured. Sign in via the desktop app or set a Composio API key, \
-             then re-run this binary. ({e})"
+            "No direct Composio client. Set a Composio API key, then re-run this binary. ({e})"
         )
     })?;
 
@@ -200,20 +192,14 @@ async fn main() -> Result<()> {
             page_token.as_ref().map(|_| " (paginated)").unwrap_or(""),
         );
 
-        let mut resp = match &client_kind {
-            ComposioClientKind::Backend(client) => client
-                .execute_tool("GMAIL_FETCH_EMAILS", Some(args.clone()))
-                .await
-                .map_err(|e| anyhow::anyhow!("GMAIL_FETCH_EMAILS page {page_num}: {e:#}"))?,
-            ComposioClientKind::Direct(direct) => direct_execute(
-                direct,
-                "GMAIL_FETCH_EMAILS",
-                Some(args.clone()),
-                &config.composio.entity_id,
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("GMAIL_FETCH_EMAILS (direct) page {page_num}: {e:#}"))?,
-        };
+        let mut resp = direct_execute(
+            &direct,
+            "GMAIL_FETCH_EMAILS",
+            Some(args.clone()),
+            &config.composio.entity_id,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("GMAIL_FETCH_EMAILS page {page_num}: {e:#}"))?;
         total_cost += resp.cost_usd;
 
         if !resp.successful {

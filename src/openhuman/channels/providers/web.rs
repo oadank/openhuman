@@ -475,8 +475,8 @@ pub async fn start_chat(
                 //
                 // Other errors flow through `report_error_or_expected`
                 // so transport-level transient failures (DNS/TCP/TLS
-                // handshake, ISP blocks — OPENHUMAN-TAURI-32 for the RU
-                // user who couldn't reach api.tinyhumans.ai at all) get
+                // handshake, ISP blocks — OPENHUMAN-TAURI-32 for a user
+                // who couldn't reach the hosted API at all) get
                 // logged as warn-level breadcrumbs instead of error
                 // events. Sentry has no signal to act on those — no
                 // status, no trace, no payload — and every retry

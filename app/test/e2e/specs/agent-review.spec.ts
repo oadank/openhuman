@@ -14,7 +14,7 @@
  *
  * This spec intentionally keeps assertions loose: its primary contract is
  * "the flow reaches each checkpoint and captures artifacts", not a strict
- * UI assertion — we already have login-flow.spec.ts for that.
+ * UI assertion — focused specs cover those routes separately.
  */
 import { waitForApp, waitForAppReady, waitForAuthBootstrap } from '../helpers/app-helpers';
 import { captureCheckpoint, getArtifactDir, saveMockRequestLog } from '../helpers/artifacts';

@@ -6,8 +6,6 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Provider id for the in-app session token profile (matches desktop/web handoff).
-pub const APP_SESSION_PROVIDER: &str = "app-session";
 /// Default named profile when none is specified.
 pub const DEFAULT_AUTH_PROFILE_NAME: &str = "default";
 

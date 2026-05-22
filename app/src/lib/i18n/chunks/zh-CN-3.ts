@@ -306,7 +306,6 @@ const zhCN3: TranslationMap = {
   'app.openhumanLink.skipForNow': '暂时跳过',
   'app.openhumanLink.telegramUnavailable': 'Telegram 不可用',
   'app.openhumanLink.title.accounts': '连接你的应用',
-  'app.openhumanLink.title.billing': '账单与配额',
   'app.openhumanLink.title.discord': '加入社区',
   'app.openhumanLink.title.messaging': '连接聊天渠道',
   'app.openhumanLink.title.notifications': '允许通知',

@@ -78,14 +78,7 @@ fn default_openhuman_dir() -> PathBuf {
 }
 
 fn env_scoped_fallback_root_dir() -> PathBuf {
-    let suffix = if crate::api::config::is_staging_app_env(
-        crate::api::config::app_env_from_env().as_deref(),
-    ) {
-        "-staging"
-    } else {
-        ""
-    };
-    PathBuf::from(format!(".openhuman{suffix}"))
+    PathBuf::from(".openhuman")
 }
 
 /// Returns the path to the active workspace marker file.
@@ -243,7 +236,6 @@ pub fn client_config_json(config: &Config) -> serde_json::Value {
         .collect();
 
     serde_json::json!({
-        "api_url": config.api_url,
         "inference_url": config.inference_url,
         "default_model": config.default_model,
         "app_version": app_version,
@@ -276,9 +268,8 @@ pub async fn load_and_get_client_config_snapshot() -> Result<RpcOutcome<serde_js
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelSettingsPatch {
-    pub api_url: Option<String>,
     /// Custom OpenAI-compatible LLM endpoint. Empty string clears the
-    /// override (inference falls back through the OpenHuman backend).
+    /// override.
     pub inference_url: Option<String>,
     pub api_key: Option<String>,
     pub default_model: Option<String>,
@@ -409,13 +400,6 @@ pub async fn apply_model_settings(
     config: &mut Config,
     update: ModelSettingsPatch,
 ) -> Result<RpcOutcome<serde_json::Value>, String> {
-    if let Some(api_url) = update.api_url {
-        config.api_url = if api_url.trim().is_empty() {
-            None
-        } else {
-            Some(api_url)
-        };
-    }
     if let Some(inference_url) = update.inference_url {
         config.inference_url = if inference_url.trim().is_empty() {
             None
@@ -851,13 +835,6 @@ pub async fn get_composio_trigger_settings() -> Result<RpcOutcome<serde_json::Va
     ))
 }
 
-/// Resolves the effective API URL from configuration or defaults.
-pub async fn load_and_resolve_api_url() -> Result<RpcOutcome<serde_json::Value>, String> {
-    let config = load_config_with_timeout().await?;
-    let resolved = crate::api::config::effective_api_url(&config.api_url);
-    Ok(RpcOutcome::new(json!({ "api_url": resolved }), Vec::new()))
-}
-
 /// Resolves a workspace onboarding flag, creating or checking its existence.
 pub async fn workspace_onboarding_flag_resolve(
     flag_name: Option<String>,
@@ -1281,7 +1258,3 @@ pub async fn get_data_paths() -> Result<RpcOutcome<serde_json::Value>, String> {
         )],
     ))
 }
-
-#[cfg(test)]
-#[path = "ops_tests.rs"]
-mod tests;

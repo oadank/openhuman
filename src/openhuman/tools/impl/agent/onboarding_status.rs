@@ -92,24 +92,11 @@ pub fn reset_welcome_exchange_count() {
 
 /// Detect whether the user is authenticated for the welcome flow.
 ///
-/// Authentication is based on the `app-session:default` profile in
-/// `auth-profiles.json`, populated by the desktop OAuth deep-link flow.
-///
-/// Returned as `(is_authenticated, auth_source_json)` so callers can
-/// both gate behaviour on the bool and embed the source label in a
-/// JSON payload without rebuilding the logic.
-pub(crate) fn detect_auth(config: &Config) -> (bool, Value) {
-    let has_session_jwt = crate::api::jwt::get_session_token(config)
-        .ok()
-        .flatten()
-        .is_some_and(|t| !t.is_empty());
-    let is_authenticated = has_session_jwt;
-    let auth_source: Value = if has_session_jwt {
-        Value::String("session_token".to_string())
-    } else {
-        Value::Null
-    };
-    (is_authenticated, auth_source)
+/// The local fork has no product-backend app session. The app itself is
+/// always local-authenticated; provider/API-key setup is reported
+/// separately through the onboarding snapshot.
+pub(crate) fn detect_auth(_config: &Config) -> (bool, Value) {
+    (true, Value::String("local".to_string()))
 }
 
 /// Build the structured JSON snapshot that the welcome agent consumes.

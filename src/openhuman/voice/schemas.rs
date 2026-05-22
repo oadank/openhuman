@@ -44,24 +44,9 @@ struct TtsParams {
     output_path: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct CloudTranscribeParams {
-    audio_base64: String,
-    #[serde(default)]
-    mime_type: Option<String>,
-    #[serde(default)]
-    file_name: Option<String>,
-    #[serde(default)]
-    model: Option<String>,
-    #[serde(default)]
-    language: Option<String>,
-}
-
 /// Factory-dispatched STT request. The caller can either pin a provider
-/// explicitly (`"cloud"` / `"whisper"`) or let the controller resolve the
-/// effective provider from `config.local_ai.stt_provider`. Keeps the
-/// existing `voice_cloud_transcribe` RPC intact for back-compat — older
-/// renderers still pin the cloud path directly.
+/// explicitly (`"whisper"`) or let the controller resolve the
+/// effective provider from `config.local_ai.stt_provider`.
 #[derive(Debug, Deserialize)]
 struct SttDispatchParams {
     audio_base64: String,
@@ -154,7 +139,6 @@ pub fn all_voice_controller_schemas() -> Vec<ControllerSchema> {
         voice_schemas("voice_transcribe_bytes"),
         voice_schemas("voice_tts"),
         voice_schemas("voice_reply_synthesize"),
-        voice_schemas("voice_cloud_transcribe"),
         voice_schemas("voice_stt_dispatch"),
         voice_schemas("voice_tts_dispatch"),
         voice_schemas("voice_set_providers"),
@@ -186,10 +170,6 @@ pub fn all_voice_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: voice_schemas("voice_reply_synthesize"),
             handler: handle_voice_reply_synthesize,
-        },
-        RegisteredController {
-            schema: voice_schemas("voice_cloud_transcribe"),
-            handler: handle_voice_cloud_transcribe,
         },
         RegisteredController {
             schema: voice_schemas("voice_stt_dispatch"),
@@ -287,8 +267,7 @@ pub fn voice_schemas(function: &str) -> ControllerSchema {
             namespace: "voice",
             function: "reply_synthesize",
             description:
-                "Synthesize an agent reply via the hosted backend (ElevenLabs) and return \
-                 base64 audio plus an Oculus-15 viseme alignment for mascot lip-sync.",
+                "Synthesize an agent reply with the configured local TTS provider.",
             inputs: vec![
                 required_string("text", "Text to synthesize."),
                 optional_string(
@@ -307,9 +286,7 @@ pub fn voice_schemas(function: &str) -> ControllerSchema {
             namespace: "voice",
             function: "stt_dispatch",
             description:
-                "Factory-dispatched speech-to-text. Routes to the cloud Whisper proxy or the \
-                 local whisper.cpp binary based on `provider` (or `config.local_ai.stt_provider` \
-                 when unspecified). Returns the same `{ text }` payload either way.",
+                "Factory-dispatched speech-to-text using the local whisper.cpp path.",
             inputs: vec![
                 required_string(
                     "audio_base64",
@@ -317,7 +294,7 @@ pub fn voice_schemas(function: &str) -> ControllerSchema {
                 ),
                 optional_string(
                     "provider",
-                    "Override provider: 'cloud' or 'whisper'. Defaults to config.local_ai.stt_provider.",
+                    "Override provider: 'whisper'. Defaults to config.local_ai.stt_provider.",
                 ),
                 optional_string("model", "Whisper model id (whisper branch only)."),
                 optional_string("mime_type", "Audio MIME type (default: audio/webm)."),
@@ -333,14 +310,12 @@ pub fn voice_schemas(function: &str) -> ControllerSchema {
             namespace: "voice",
             function: "tts_dispatch",
             description:
-                "Factory-dispatched text-to-speech. Routes to the cloud ElevenLabs proxy \
-                 (returns rich viseme alignment) or local Piper (returns audio + a synthetic \
-                 viseme timeline) based on `provider` (or `config.local_ai.tts_provider`).",
+                "Factory-dispatched text-to-speech using local Piper, Kokoro, or system speech.",
             inputs: vec![
                 required_string("text", "Text to synthesize."),
                 optional_string(
                     "provider",
-                    "Override provider: 'cloud', 'piper', or 'system' (macOS only). Defaults to config.local_ai.tts_provider.",
+                    "Override provider: 'piper', 'kokoro', or 'system' (macOS only). Defaults to config.local_ai.tts_provider.",
                 ),
                 optional_string(
                     "voice",
@@ -362,11 +337,11 @@ pub fn voice_schemas(function: &str) -> ControllerSchema {
             inputs: vec![
                 optional_string(
                     "stt_provider",
-                    "STT provider id ('cloud' or 'whisper'). Omitted = unchanged.",
+                    "STT provider id ('whisper'). Omitted = unchanged.",
                 ),
                 optional_string(
                     "tts_provider",
-                    "TTS provider id ('cloud', 'piper', 'kokoro', or 'system' for macOS-native say). Omitted = unchanged.",
+                    "TTS provider id ('piper', 'kokoro', or 'system' for macOS-native say). Omitted = unchanged.",
                 ),
                 optional_string("stt_model", "Whisper model id (e.g. 'whisper-large-v3-turbo')."),
                 optional_string("tts_voice", "Piper voice id (e.g. 'en_US-lessac-medium')."),
@@ -389,24 +364,6 @@ pub fn voice_schemas(function: &str) -> ControllerSchema {
                 "Updated provider selectors: { stt_provider, tts_provider, stt_model_id, tts_voice_id, \
                  kokoro_endpoint_url, kokoro_model, kokoro_voice }.",
             )],
-        },
-        "voice_cloud_transcribe" => ControllerSchema {
-            namespace: "voice",
-            function: "cloud_transcribe",
-            description:
-                "Transcribe audio bytes via the hosted backend's STT endpoint. Used by the \
-                 mascot's mic-only composer so we don't ship a provider API key in the desktop app.",
-            inputs: vec![
-                required_string(
-                    "audio_base64",
-                    "Base64-encoded audio bytes (e.g. webm/opus from MediaRecorder).",
-                ),
-                optional_string("mime_type", "Audio MIME type (default: audio/webm)."),
-                optional_string("file_name", "Original filename hint (default: audio.webm)."),
-                optional_string("model", "Backend STT model id (default: whisper-v1)."),
-                optional_string("language", "BCP-47 language hint, e.g. 'en'."),
-            ],
-            outputs: vec![json_output("result", "CloudTranscribeResult: { text }.")],
         },
         "voice_server_start" => ControllerSchema {
             namespace: "voice",
@@ -565,27 +522,6 @@ fn handle_voice_reply_synthesize(params: Map<String, Value>) -> ControllerFuture
             provider
                 .synthesize(&config, &p.text, effective_voice)
                 .await?,
-        )
-    })
-}
-
-fn handle_voice_cloud_transcribe(params: Map<String, Value>) -> ControllerFuture {
-    Box::pin(async move {
-        let config = config_rpc::load_config_with_timeout().await?;
-        let p = deserialize_params::<CloudTranscribeParams>(params)?;
-        let opts = crate::openhuman::voice::cloud_transcribe::CloudTranscribeOptions {
-            model: p.model,
-            language: p.language,
-            mime_type: p.mime_type,
-            file_name: p.file_name,
-        };
-        to_json(
-            crate::openhuman::voice::cloud_transcribe::transcribe_cloud(
-                &config,
-                &p.audio_base64,
-                &opts,
-            )
-            .await?,
         )
     })
 }
@@ -767,29 +703,26 @@ fn handle_voice_set_providers(params: Map<String, Value>) -> ControllerFuture {
 
 fn validate_stt_provider(provider: &str) -> Result<(), String> {
     match provider {
-        "cloud" | "whisper" => Ok(()),
+        "whisper" => Ok(()),
         other => Err(format!(
-            "invalid stt_provider '{other}' (valid: 'cloud', 'whisper')"
+            "invalid stt_provider '{other}' (valid: 'whisper')"
         )),
     }
 }
 
 fn validate_tts_provider(provider: &str) -> Result<(), String> {
     match provider {
-        "cloud" | "piper" | "kokoro" | "system" => Ok(()),
+        "piper" | "kokoro" | "system" => Ok(()),
         other => Err(format!(
-            "invalid tts_provider '{other}' (valid: 'cloud', 'piper', 'kokoro', 'system')"
+            "invalid tts_provider '{other}' (valid: 'piper', 'kokoro', 'system')"
         )),
     }
 }
 
-/// Read the user-selected STT provider from config. Defaults to `"cloud"`
-/// for fresh installs — keeps the existing renderer behaviour unchanged
-/// until the user opts into the local stack.
 fn effective_stt_provider(config: &crate::openhuman::config::Config) -> String {
     let raw = config.local_ai.stt_provider.trim();
     if raw.is_empty() {
-        "cloud".to_string()
+        "whisper".to_string()
     } else {
         raw.to_string()
     }
@@ -798,7 +731,7 @@ fn effective_stt_provider(config: &crate::openhuman::config::Config) -> String {
 fn effective_tts_provider(config: &crate::openhuman::config::Config) -> String {
     let raw = config.local_ai.tts_provider.trim();
     if raw.is_empty() {
-        "cloud".to_string()
+        "kokoro".to_string()
     } else {
         raw.to_string()
     }

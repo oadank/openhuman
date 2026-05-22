@@ -9,7 +9,7 @@
 //! # Prerequisites
 //!
 //! - A working openhuman install (same workspace dir the desktop app
-//!   uses) with a signed-in session JWT.
+//!   uses) with a configured Composio API key.
 //! - A Slack connection created via Composio's OAuth flow (e.g. from
 //!   the desktop app's Integrations screen). No self-hosted Slack App
 //!   or bot token is needed — authorization lives in Composio.
@@ -53,9 +53,6 @@ use openhuman_core::openhuman::composio::types::{
 use openhuman_core::openhuman::config::Config;
 use openhuman_core::openhuman::memory;
 
-/// Dispatch a Composio action through the live `ComposioClientKind`.
-/// Centralises the backend-vs-direct branch so the per-call sites in
-/// `main` don't each have to match on the kind (#1710 Wave 2).
 async fn execute_action(
     client_kind: &ComposioClientKind,
     config: &Config,
@@ -63,19 +60,16 @@ async fn execute_action(
     arguments: Option<serde_json::Value>,
 ) -> anyhow::Result<ComposioExecuteResponse> {
     match client_kind {
-        ComposioClientKind::Backend(client) => client.execute_tool(tool, arguments).await,
         ComposioClientKind::Direct(direct) => {
             direct_execute(direct, tool, arguments, &config.composio.entity_id).await
         }
     }
 }
 
-/// Mode-aware counterpart to `ComposioClient::list_connections()`.
 async fn list_connections_via_kind(
     client_kind: &ComposioClientKind,
 ) -> anyhow::Result<ComposioConnectionsResponse> {
     match client_kind {
-        ComposioClientKind::Backend(client) => client.list_connections().await,
         ComposioClientKind::Direct(direct) => direct_list_connections(direct).await,
     }
 }
@@ -198,14 +192,10 @@ async fn main() -> Result<()> {
         anyhow::anyhow!("SlackProvider not registered after init_default_providers")
     })?;
 
-    // Resolve through the mode-aware factory so the backfill runs in
-    // EITHER backend mode (legacy JWT-driven path) OR direct mode (BYO
-    // Composio API key on the user's personal tenant) — #1710 Wave 2.
     let client_kind = create_composio_client(&config).map_err(|e| {
         anyhow::anyhow!(
-            "No Composio client — user not signed in (backend session) and no direct-mode \
-             API key configured. Sign in via the desktop app or set a Composio API key, \
-             then re-run this binary. ({e})"
+            "No Composio direct client. Set a Composio API key in the desktop app or \
+             config.toml, then re-run this binary. ({e})"
         )
     })?;
 
@@ -442,10 +432,8 @@ async fn main() -> Result<()> {
         let started = Instant::now();
         let mut total_buckets = 0usize;
         for conn in &slack_conns {
-            // `ProviderContext` no longer caches a pre-baked client —
-            // `ctx.execute(...)` resolves via the mode-aware factory
-            // per call (#1710 / Wave 1). The local `client` handle is
-            // still used above for backend-only metadata probes.
+            // `ctx.execute(...)` resolves a direct Composio client per
+            // call so config/key updates are picked up between runs.
             let ctx = ProviderContext {
                 config: Arc::clone(&config),
                 toolkit: conn.toolkit.clone(),

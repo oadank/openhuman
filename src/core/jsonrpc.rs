@@ -71,10 +71,6 @@ pub async fn rpc_handler(State(state): State<AppState>, Json(req): Json<RpcReque
                 None => (raw_message, None, false),
             };
 
-            // Session-expired bubbles up as an "error" but is an expected
-            // boundary condition (auth handler clears the local token and the
-            // UI re-auths). Don't spam Sentry with it.
-            //
             // Param-validation failures ("unknown param 'x' for ns.fn",
             // "missing required param 'x'", "invalid params: …") are also
             // pure boundary mismatches: either the caller is a frontend on a
@@ -84,15 +80,6 @@ pub async fn rpc_handler(State(state): State<AppState>, Json(req): Json<RpcReque
             // cannot help — we can neither retro-fix already-shipped
             // installs nor learn anything from the noise — so log at info
             // and skip the report.
-            //
-            // Logging asymmetry between the two skip paths is intentional:
-            // session-expired messages are a small set of fixed strings
-            // (no caller-supplied content), so the full text is safe to
-            // log. Param-validation messages embed caller-supplied param
-            // names and, for the `invalid params: …` shape, can carry
-            // deserialized values — log structurally with redacted body
-            // to keep PII out of the sink while preserving the method
-            // for grep / correlation.
             //
             // Domains that surface their own expected-user-state errors
             // (stale thread refs, etc.) set the `expected_user_state` flag
@@ -109,8 +96,6 @@ pub async fn rpc_handler(State(state): State<AppState>, Json(req): Json<RpcReque
                     elapsed_ms = ms as u64,
                     "[rpc] param-validation error (message redacted; skip-report)"
                 );
-            } else if is_session_expired_error(&display_message) {
-                tracing::info!("[rpc] {} -> err ({}ms): {}", method, ms, display_message);
             } else if crate::core::observability::is_transient_message_failure(&display_message) {
                 // Downstream call (backend_api / integrations / provider) already
                 // demoted the underlying transient failure to a warn. The error
@@ -158,82 +143,8 @@ pub async fn rpc_handler(State(state): State<AppState>, Json(req): Json<RpcReque
 }
 
 /// Invokes a JSON-RPC method by name.
-///
-/// This is a high-level wrapper around [`invoke_method_inner`] that adds
-/// automatic session management logic. If a call fails with a 401 Unauthorized
-/// error from the backend, it will automatically clear the local session.
-///
-/// # Arguments
-///
-/// * `state` - The application state.
-/// * `method` - The name of the method to invoke.
-/// * `params` - The JSON parameters for the method.
 pub async fn invoke_method(state: AppState, method: &str, params: Value) -> Result<Value, String> {
-    let result = invoke_method_inner(state, method, params).await;
-
-    // Session auto-cleanup: if the backend says we're unauthorized, publish
-    // a `SessionExpired` event. The credentials subscriber clears the stored
-    // token, flips the scheduler-gate signed-out override so background
-    // workers stand down, and (eventually) pushes a sign-out to the UI.
-    // Centralising via the event bus means 401 detection from any path
-    // (this one, `llm_provider.api_error`, …) gets the same teardown.
-    if let Err(ref msg) = result {
-        if is_session_expired_error(msg) {
-            log::warn!(
-                "[jsonrpc] backend returned 401 for method '{}' — publishing SessionExpired",
-                method
-            );
-            // Scrub before publishing — subscribers log `reason`, and the
-            // upstream error string could include API keys / tokens from
-            // pasted-through provider replies. `sanitize_api_error` runs
-            // `scrub_secret_patterns` and truncates.
-            crate::core::event_bus::publish_global(
-                crate::core::event_bus::DomainEvent::SessionExpired {
-                    source: format!("jsonrpc.invoke_method:{method}"),
-                    reason: crate::openhuman::inference::provider::ops::sanitize_api_error(msg),
-                },
-            );
-        }
-    }
-
-    result
-}
-
-/// Helper to determine if an error message indicates an expired or invalid session.
-///
-/// Deliberately **looser** than
-/// [`crate::core::observability::is_session_expired_message`]: this
-/// dispatch-site predicate also matches the generic `"401 + unauthorized"` /
-/// `"invalid token"` pair so token cleanup +
-/// `DomainEvent::SessionExpired` publish fire on *any* 401, including
-/// BYO-key provider failures (which clear the stale local token even if
-/// the user mis-configured an OpenAI / Anthropic key). The strict
-/// classifier in `observability` is for the agent / web-channel
-/// `report_error_or_expected` call sites, where matching too loosely would
-/// silence actionable BYO-key configuration errors (OPENHUMAN-TAURI-26
-/// rationale: the agent-layer demote must NOT also swallow generic
-/// provider 401s).
-///
-/// "No backend session token" is also treated as a session-expired signal: the
-/// auth profile is missing entirely (the user was never signed in, or their
-/// stored profile was wiped between login and the next RPC). The frontend may
-/// still believe it holds a session token from an optimistic post-login patch,
-/// so we want the same auto-cleanup + UI-level re-auth path to fire instead of
-/// repeatedly reporting this as a hard error to Sentry. See #1465-ish: users
-/// stuck on the onboarding `SkillsStep` would spam `composio_list_connections`
-/// failures every 5 s without ever being bounced back to the login screen.
-///
-/// "session JWT required" covers the case where a prior 401 already cleared the
-/// token and the very next RPC call (e.g. `channels_telegram_login_start`) finds
-/// no JWT in the store. This is the same auth-boundary condition, just surfaced
-/// as a local guard rather than a backend response.
-fn is_session_expired_error(msg: &str) -> bool {
-    let lower = msg.to_lowercase();
-    (lower.contains("401") && lower.contains("unauthorized"))
-        || lower.contains("invalid token")
-        || lower.contains("no backend session token")
-        || lower.contains("session jwt required")
-        || msg.contains("SESSION_EXPIRED")
+    invoke_method_inner(state, method, params).await
 }
 
 /// Returns `true` when the error message comes from JSON-RPC params validation
@@ -340,187 +251,6 @@ pub fn default_state() -> AppState {
 
 // --- HTTP server (Axum) ----------------------------------------------------
 
-/// Query parameters for the Telegram authentication callback.
-#[derive(Debug, serde::Deserialize)]
-struct TelegramAuthQuery {
-    /// The one-time login token received from the Telegram bot.
-    token: Option<String>,
-}
-
-/// Returns the HTML for a successful connection page.
-fn success_html() -> String {
-    r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OpenHuman &#8212; Connected</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-        .card { background: #1e293b; border-radius: 16px; padding: 48px; text-align: center; max-width: 420px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); }
-        .icon { font-size: 48px; margin-bottom: 16px; }
-        h1 { font-size: 24px; margin-bottom: 12px; color: #f8fafc; }
-        p { font-size: 16px; color: #94a3b8; line-height: 1.6; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="icon">&#10004;</div>
-        <h1>Connected!</h1>
-        <p>Your Telegram account has been connected to OpenHuman. You can close this tab.</p>
-    </div>
-</body>
-</html>"#
-        .to_string()
-}
-
-/// Simple HTML escaping for error messages.
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
-}
-
-/// Returns the HTML for an error page.
-fn error_html(message: &str) -> String {
-    let escaped_message = escape_html(message);
-    format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OpenHuman &#8212; Error</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
-        .card {{ background: #1e293b; border-radius: 16px; padding: 48px; text-align: center; max-width: 420px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3); }}
-        .icon {{ font-size: 48px; margin-bottom: 16px; }}
-        h1 {{ font-size: 24px; margin-bottom: 12px; color: #f8fafc; }}
-        p {{ font-size: 16px; color: #94a3b8; line-height: 1.6; }}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="icon">&#9888;</div>
-        <h1>Something went wrong</h1>
-        <p>{escaped_message}</p>
-    </div>
-</body>
-</html>"#
-    )
-}
-
-/// Handles the Telegram authentication callback.
-///
-/// It consumes a one-time token, exchanges it for a JWT from the backend,
-/// and stores the session locally.
-async fn telegram_auth_handler(Query(query): Query<TelegramAuthQuery>) -> impl IntoResponse {
-    let html_response = |status: StatusCode, body: String| -> Response {
-        (
-            status,
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            body,
-        )
-            .into_response()
-    };
-
-    let token = match query
-        .token
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        Some(t) => t.to_string(),
-        None => {
-            return html_response(
-                StatusCode::BAD_REQUEST,
-                error_html("Missing token parameter. Send /start register to the bot again."),
-            )
-        }
-    };
-
-    log::info!("[auth:telegram] Received registration callback with token");
-
-    let config = match crate::openhuman::config::Config::load_or_init().await {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("[auth:telegram] Failed to load config: {e}");
-            return html_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error_html("Internal error. Please try again."),
-            );
-        }
-    };
-
-    let api_url = crate::api::config::effective_backend_api_url(&config.api_url);
-
-    let client = match crate::api::rest::BackendOAuthClient::new(&api_url) {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("[auth:telegram] Failed to create API client: {e}");
-            return html_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error_html("Internal error. Please try again."),
-            );
-        }
-    };
-
-    // Exchange the login token for a session JWT.
-    let jwt_token = match client.consume_login_token(&token).await {
-        Ok(jwt) => jwt,
-        Err(e) => {
-            let error_str = e.to_string();
-            // Check if this is a client-side error (token validation) or server-side error
-            let is_client_error = error_str.contains("expired")
-                || error_str.contains("invalid")
-                || error_str.contains("not found")
-                || error_str.contains("already used")
-                || error_str.contains("401")
-                || error_str.contains("400")
-                || error_str.contains("404");
-
-            if is_client_error {
-                log::warn!("[auth:telegram] Token consumption failed (client error): {e}");
-                return html_response(
-                    StatusCode::BAD_REQUEST,
-                    error_html(
-                        "This link has expired or was already used. Send /start register to the bot again.",
-                    ),
-                );
-            } else {
-                log::error!("[auth:telegram] Token consumption failed (server error): {e}");
-                return html_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    error_html("Internal server error, please try again later."),
-                );
-            }
-        }
-    };
-
-    // Store the resulting session token in the local configuration.
-    match crate::openhuman::credentials::ops::store_session(&config, &jwt_token, None, None).await {
-        Ok(outcome) => {
-            for msg in &outcome.logs {
-                log::info!("[auth:telegram] {msg}");
-            }
-            log::info!("[auth:telegram] Session stored successfully");
-        }
-        Err(e) => {
-            log::error!("[auth:telegram] Failed to store session: {e}");
-            return html_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                error_html("Connected to Telegram but failed to save session. Please try again."),
-            );
-        }
-    }
-
-    html_response(StatusCode::OK, success_html())
-}
-
 /// WebSocket upgrade handler for streaming voice dictation.
 async fn dictation_ws_handler(ws: WebSocketUpgrade) -> Response {
     log::info!("[ws] dictation WebSocket upgrade requested");
@@ -554,7 +284,6 @@ pub fn build_core_http_router(socketio_enabled: bool) -> Router {
         .route("/events/webhooks", get(webhook_events_handler))
         .route("/rpc", post(rpc_handler))
         .route("/ws/dictation", get(dictation_ws_handler))
-        .route("/auth/telegram", get(telegram_auth_handler))
         // OpenAI-compatible inference endpoint (/v1/chat/completions, /v1/models)
         .nest("/v1", crate::openhuman::inference::http::router())
         .fallback(not_found_handler)
@@ -691,17 +420,11 @@ async fn webhook_events_handler() -> Response {
 
 /// Handler for the root endpoint, returning server information and available endpoints.
 async fn root_handler() -> impl IntoResponse {
-    let api_server = match crate::openhuman::config::Config::load_or_init().await {
-        Ok(cfg) => crate::api::config::effective_backend_api_url(&cfg.api_url),
-        Err(_) => crate::api::config::effective_backend_api_url(&None),
-    };
-
     (
         StatusCode::OK,
         Json(json!({
             "name": "openhuman",
             "ok": true,
-            "api_server": api_server,
             "endpoints": {
                 "health": "/health",
                 "schema": "/schema",
@@ -1076,14 +799,6 @@ fn register_domain_subscribers(
             log::warn!("[event_bus] failed to register webhook subscriber — bus not initialized");
         }
 
-        if let Some(handle) = crate::core::event_bus::subscribe_global(Arc::new(
-            crate::openhuman::channels::bus::ChannelInboundSubscriber::new(),
-        )) {
-            std::mem::forget(handle);
-        } else {
-            log::warn!("[event_bus] failed to register channel subscriber — bus not initialized");
-        }
-
         crate::openhuman::health::bus::register_health_subscriber();
         crate::openhuman::notifications::register_notification_bridge_subscriber();
         crate::openhuman::memory::conversations::register_conversation_persistence_subscriber(
@@ -1107,21 +822,6 @@ fn register_domain_subscribers(
         // provider (or local Ollama). Leave the scheduler gate open so
         // chat / cron / channels can run on first boot without needing
         // a JWT that no longer exists.
-        crate::openhuman::scheduler_gate::set_signed_out(false);
-
-        // Register the SessionExpired handler before any subscribers that
-        // might publish 401-derived events, so the very first 401 is
-        // routed through `clear_session` + the scheduler-gate override.
-        if let Some(handle) = crate::core::event_bus::subscribe_global(Arc::new(
-            crate::openhuman::credentials::bus::SessionExpiredSubscriber::new(),
-        )) {
-            std::mem::forget(handle);
-        } else {
-            log::warn!(
-                "[event_bus] failed to register SessionExpired subscriber — bus not initialized"
-            );
-        }
-
         crate::openhuman::memory::tree::jobs::start(config.clone());
 
         // Restart requests go through a subscriber so every trigger path shares
@@ -1148,15 +848,13 @@ fn register_domain_subscribers(
         crate::openhuman::agent::bus::register_agent_handlers();
 
         log::info!(
-            "[event_bus] domain subscribers registered (webhook, channel, health, conversation, composio, restart, proactive, agent, session_expired)"
+            "[event_bus] domain subscribers registered (webhook, health, conversation, composio, restart, proactive, agent)"
         );
     });
 }
 
 /// Initializes long-lived socket/event-bus infrastructure.
 pub async fn bootstrap_core_runtime(embedded_core: bool) {
-    use crate::openhuman::socket::{set_global_socket_manager, SocketManager};
-    use std::sync::Arc;
     let cfg = match crate::openhuman::config::Config::load_or_init().await {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -1172,6 +870,9 @@ pub async fn bootstrap_core_runtime(embedded_core: bool) {
     // Register domain subscribers for cross-module event handling.
     // Uses a Once guard so repeated calls to bootstrap_core_runtime()
     // cannot double-subscribe.
+    crate::openhuman::webhooks::init_global_webhook_router(Some(
+        workspace_dir.join("state").join("webhook_routes.json"),
+    ));
     register_domain_subscribers(workspace_dir.clone(), cfg.clone(), embedded_core);
 
     // --- Turn-state recovery -------------------------------------------
@@ -1243,44 +944,6 @@ pub async fn bootstrap_core_runtime(embedded_core: bool) {
         }
     }
 
-    // --- Socket manager bootstrap ---
-    let socket_mgr = Arc::new(SocketManager::new());
-    set_global_socket_manager(socket_mgr.clone());
-    log::info!("[socket] SocketManager initialized and registered globally");
-
-    // Auto-connect socket to backend if a session token is already stored.
-    // This runs in the background so it doesn't block server startup.
-    tokio::spawn(async move {
-        log::info!("[socket] Checking for stored session to auto-connect...");
-        let config = match crate::openhuman::config::Config::load_or_init().await {
-            Ok(c) => c,
-            Err(e) => {
-                log::debug!("[socket] Config not available for auto-connect: {e}");
-                return;
-            }
-        };
-        let api_url = crate::api::config::effective_backend_api_url(&config.api_url);
-        let token = match crate::api::jwt::get_session_token(&config) {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                log::info!("[socket] No session token stored — skipping auto-connect (will connect after login)");
-                return;
-            }
-            Err(e) => {
-                log::warn!("[socket] Failed to read session token: {e}");
-                return;
-            }
-        };
-        log::info!(
-            "[socket] Session token found — auto-connecting to {}",
-            api_url
-        );
-        if let Err(e) = socket_mgr.connect(&api_url, &token).await {
-            log::error!("[socket] Auto-connect failed: {e}");
-        } else {
-            log::info!("[socket] Auto-connect initiated successfully");
-        }
-    });
 }
 
 /// JSON-serializable wrapper for the entire RPC schema dump.

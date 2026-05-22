@@ -21,7 +21,7 @@ export interface ModelRoute {
 }
 
 /** Authentication header style. Matches Rust AuthStyle enum. */
-export type AuthStyle = 'bearer' | 'anthropic' | 'openhuman_jwt' | 'none';
+export type AuthStyle = 'bearer' | 'anthropic' | 'none';
 
 /** @deprecated Use AuthStyle. Kept for back-compat with old wire format. */
 export type CloudProviderType = 'openhuman' | 'openai' | 'anthropic' | 'openrouter' | 'custom';
@@ -44,14 +44,9 @@ export interface CloudProviderCreds {
 
 export interface ModelSettingsUpdate {
   /**
-   * OpenHuman product backend URL. Almost always left untouched; the
-   * inference endpoint is the separate `inference_url` field.
-   */
-  api_url?: string | null;
-  /**
    * Custom OpenAI-compatible LLM endpoint. When set together with
    * `api_key`, inference talks directly to this URL instead of routing
-   * through the OpenHuman backend. Send an empty string to clear.
+   * the configured provider. Send an empty string to clear.
    */
   inference_url?: string | null;
   api_key?: string | null;
@@ -60,8 +55,7 @@ export interface ModelSettingsUpdate {
   /**
    * When present, REPLACES `config.model_routes` wholesale with these
    * `(hint, model)` pairs. Send `[]` to clear all routes (used when switching
-   * back to the OpenHuman backend whose built-in router picks per-task models
-   * on its own). Omit to leave existing routes untouched.
+   * back to defaults). Omit to leave existing routes untouched.
    */
   model_routes?: ModelRoute[] | null;
   /**
@@ -189,12 +183,10 @@ export async function openhumanGetConfig(): Promise<CommandResponse<ConfigSnapsh
 
 /**
  * Safe client-facing config slice. Never contains the raw api_key — only
- * `api_key_set` indicates whether a custom backend key is stored. See
+ * `api_key_set` indicates whether a legacy custom inference key is stored. See
  * `config.get_client_config` in `src/openhuman/config/schemas.rs`.
  */
 export interface ClientConfig {
-  /** OpenHuman product backend URL (auth/billing/voice). */
-  api_url: string | null;
   /**
    * Custom OpenAI-compatible LLM endpoint. Legacy field, retained for
    * back-compat — the new AI settings panel reads/writes

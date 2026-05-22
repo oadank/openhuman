@@ -25,7 +25,7 @@ use anyhow::Context;
 
 use crate::openhuman::config::Config;
 use crate::openhuman::inference::provider::factory::{
-    create_chat_provider_from_string, provider_for_role, PROVIDER_OPENHUMAN,
+    create_chat_provider_from_string, provider_for_role,
 };
 use crate::openhuman::inference::provider::Provider;
 
@@ -165,7 +165,7 @@ pub fn build_local_provider_with_config(config: &Config) -> Option<ResolvedProvi
 /// chat / memory-tree / channels surfaces use after commit `95f1e3c4`.
 fn build_remote_provider(config: &Config) -> anyhow::Result<ResolvedProvider> {
     let resolved = provider_for_role("chat", config);
-    if resolved == PROVIDER_OPENHUMAN {
+    if resolved.trim().is_empty() {
         // The factory's `make_openhuman_backend` would hard-error
         // anyway, but pre-empting it lets us surface a clearer
         // actionable message that matches the rest of the fork's

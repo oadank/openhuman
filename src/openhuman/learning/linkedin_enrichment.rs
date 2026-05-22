@@ -1,24 +1,19 @@
-//! LinkedIn profile enrichment via Gmail email mining + Apify scraping.
+//! LinkedIn profile enrichment via Gmail email mining and local profile notes.
 //!
 //! Pipeline:
 //!
 //! 1. Search Gmail (via Composio) for emails from `linkedin.com`.
 //! 2. Extract a `linkedin.com/in/<slug>` profile URL from the results.
-//! 3. Scrape the profile via the Apify actor `dev_fusion/linkedin-profile-scraper`.
-//! 4. Persist the scraped profile data into the user-profile memory namespace.
+//! 3. Persist the discovered profile URL into `PROFILE.md` and user-profile memory.
 //!
 //! Designed to run once during onboarding as a fire-and-forget enrichment
 //! pass. Each stage logs progress so the caller (or a future frontend
 //! progress UI) can observe what happened.
 
 use crate::openhuman::config::Config;
-use crate::openhuman::integrations::{build_client, IntegrationClient};
 use regex::Regex;
 use serde_json::json;
-use std::sync::{Arc, LazyLock};
-
-/// Apify actor slug for the LinkedIn profile scraper.
-const LINKEDIN_SCRAPER_ACTOR: &str = "dev_fusion/linkedin-profile-scraper";
+use std::sync::LazyLock;
 
 /// Regex that captures a LinkedIn username from profile URLs.
 ///
@@ -57,7 +52,7 @@ pub struct EnrichmentStage {
 pub struct LinkedInEnrichmentResult {
     /// The LinkedIn profile URL found in Gmail, if any.
     pub profile_url: Option<String>,
-    /// Raw scraped profile JSON from Apify, if the scrape succeeded.
+    /// Raw scraped profile JSON, if a direct scraper is configured in the future.
     pub profile_data: Option<serde_json::Value>,
     /// Typed stage results for structured consumption by the frontend.
     pub stages: Vec<EnrichmentStage>,
@@ -65,7 +60,7 @@ pub struct LinkedInEnrichmentResult {
     pub log: Vec<String>,
 }
 
-/// Run the full Gmail → LinkedIn → Apify enrichment pipeline.
+/// Run the Gmail → LinkedIn enrichment pipeline.
 ///
 /// `preset_profile_url` lets callers skip the Gmail-search stage and
 /// supply a profile URL they already discovered out-of-band — currently
@@ -78,8 +73,7 @@ pub struct LinkedInEnrichmentResult {
 /// a Composio-free fallback ships).
 ///
 /// Returns `Ok` with a result struct even if individual stages fail —
-/// partial progress is still useful. Only returns `Err` if we can't
-/// even build the integration client (i.e. user isn't signed in).
+/// partial progress is still useful.
 pub async fn run_linkedin_enrichment(
     config: &Config,
     preset_profile_url: Option<String>,
@@ -104,7 +98,7 @@ pub async fn run_linkedin_enrichment(
         result
             .log
             .push("PROFILE.md already exists — skipping enrichment.".into());
-        for id in ["gmail-search", "apify-scrape", "build-profile"] {
+        for id in ["gmail-search", "build-profile"] {
             result.stages.push(EnrichmentStage {
                 id: id.into(),
                 status: StageStatus::Skipped,
@@ -113,9 +107,6 @@ pub async fn run_linkedin_enrichment(
         }
         return Ok(result);
     }
-
-    let client = build_client(config)
-        .ok_or_else(|| anyhow::anyhow!("no integration client — user not signed in"))?;
 
     // ── Stage 1: search Gmail for LinkedIn emails ───────────────────
     let profile_url = if let Some(url) = preset_profile_url {
@@ -172,28 +163,19 @@ pub async fn run_linkedin_enrichment(
 
     result.profile_url = profile_url.clone();
 
-    // ── Stage 2: scrape the LinkedIn profile via Apify ───────────────
+    // ── Stage 2: write URL-only local profile context ───────────────
     let Some(url) = profile_url else {
         result
             .log
-            .push("Skipping LinkedIn scrape — no profile URL.".into());
-        result.stages.push(EnrichmentStage {
-            id: "apify-scrape".into(),
-            status: StageStatus::Skipped,
-            detail: Some("No profile URL to scrape".into()),
-        });
+            .push("Skipping LinkedIn profile note — no profile URL.".into());
         result.stages.push(EnrichmentStage {
             id: "build-profile".into(),
             status: StageStatus::Skipped,
-            detail: Some("No profile data".into()),
+            detail: Some("No profile URL".into()),
         });
         return Ok(result);
     };
 
-    tracing::info!(url = %url, "[linkedin_enrichment] stage 2: scraping LinkedIn profile via Apify");
-    result.log.push("Scraping LinkedIn profile...".into());
-
-    // Build memory client once for all persist calls.
     let memory = match build_memory_client() {
         Ok(m) => Some(m),
         Err(e) => {
@@ -205,68 +187,27 @@ pub async fn run_linkedin_enrichment(
         }
     };
 
-    match scrape_linkedin_profile(&client, &url).await {
-        Ok(data) => {
-            tracing::info!("[linkedin_enrichment] Apify scrape succeeded");
-            result
-                .log
-                .push("LinkedIn profile scraped successfully.".into());
-            result.stages.push(EnrichmentStage {
-                id: "apify-scrape".into(),
-                status: StageStatus::Success,
-                detail: None,
-            });
-
-            // ── Stage 3: write PROFILE.md to workspace ──────────────
-            tracing::info!("[linkedin_enrichment] stage 3: writing PROFILE.md");
-            if let Err(e) = write_profile_md(config, &url, &data).await {
-                tracing::warn!(error = %e, "[linkedin_enrichment] failed to write PROFILE.md");
-                result.log.push(format!("Failed to write PROFILE.md: {e}"));
-                result.stages.push(EnrichmentStage {
-                    id: "build-profile".into(),
-                    status: StageStatus::Failed,
-                    detail: Some(format!("{e}")),
-                });
-            } else {
-                result.log.push("PROFILE.md written to workspace.".into());
-                result.stages.push(EnrichmentStage {
-                    id: "build-profile".into(),
-                    status: StageStatus::Success,
-                    detail: Some("PROFILE.md written".into()),
-                });
-            }
-
-            // Also persist to memory store for RAG retrieval.
-            if let Some(ref mem) = memory {
-                if let Err(e) = persist_linkedin_profile(mem, &url, &data).await {
-                    tracing::warn!(error = %e, "[linkedin_enrichment] failed to persist to memory");
-                }
-            }
-
-            result.profile_data = Some(data);
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "[linkedin_enrichment] Apify scrape failed");
-            result.log.push(format!("LinkedIn scrape failed: {e}"));
-            result.stages.push(EnrichmentStage {
-                id: "apify-scrape".into(),
-                status: StageStatus::Failed,
-                detail: Some(format!("{e}")),
-            });
-            result.stages.push(EnrichmentStage {
-                id: "build-profile".into(),
-                status: StageStatus::Skipped,
-                detail: Some("Scrape failed".into()),
-            });
-
-            // Still write a minimal PROFILE.md with just the URL.
-            if let Err(e) = write_profile_md_url_only(config, &url) {
-                tracing::warn!(error = %e, "[linkedin_enrichment] failed to write PROFILE.md");
-            }
-            if let Some(ref mem) = memory {
-                let _ = persist_linkedin_url_only(mem, &url).await;
-            }
-        }
+    tracing::info!(url = %url, "[linkedin_enrichment] stage 2: writing URL-only PROFILE.md");
+    if let Err(e) = write_profile_md_url_only(config, &url) {
+        tracing::warn!(error = %e, "[linkedin_enrichment] failed to write PROFILE.md");
+        result.log.push(format!("Failed to write PROFILE.md: {e}"));
+        result.stages.push(EnrichmentStage {
+            id: "build-profile".into(),
+            status: StageStatus::Failed,
+            detail: Some(format!("{e}")),
+        });
+    } else {
+        result
+            .log
+            .push("PROFILE.md written with LinkedIn profile URL.".into());
+        result.stages.push(EnrichmentStage {
+            id: "build-profile".into(),
+            status: StageStatus::Success,
+            detail: Some("PROFILE.md written".into()),
+        });
+    }
+    if let Some(ref mem) = memory {
+        let _ = persist_linkedin_url_only(mem, &url).await;
     }
 
     Ok(result)
@@ -330,7 +271,7 @@ pub async fn summarise_profile_with_llm(config: &Config, raw_md: &str) -> anyhow
     };
     let provider = create_backend_inference_provider(
         config.inference_url.as_deref(),
-        config.api_url.as_deref(),
+        None,
         config.api_key.as_deref(),
         &options,
     )?;
@@ -371,7 +312,7 @@ Rules:\n\
     Ok(summary)
 }
 
-/// Minimal fallback when the Apify scrape failed but we have the URL.
+/// Minimal local profile note when we have only the LinkedIn URL.
 fn write_profile_md_url_only(config: &Config, url: &str) -> anyhow::Result<()> {
     let md = format!(
         "# User Profile\n\n\
@@ -386,7 +327,7 @@ fn write_profile_md_url_only(config: &Config, url: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Turn the Apify scrape JSON into clean Markdown.
+/// Turn LinkedIn profile JSON into clean Markdown.
 pub fn render_profile_markdown(url: &str, data: &serde_json::Value) -> String {
     let s = |key: &str| {
         data.get(key)
@@ -519,14 +460,7 @@ async fn search_gmail_for_linkedin(config: &Config) -> anyhow::Result<Option<Str
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
 
-    // Resolve through the mode-aware factory so a direct-mode user
-    // with a stored API key can still drive Gmail enrichment from the
-    // personal Composio tenant (#1710 Wave 2). Pre-fix this path used
-    // `build_composio_client` and returned early for any user without
-    // a backend session, silently disabling LinkedIn enrichment for
-    // direct-mode users even when their LinkedIn/Gmail connections
-    // were healthy on app.composio.dev.
-    let client_kind = create_composio_client(config)
+    let ComposioClientKind::Direct(direct) = create_composio_client(config)
         .map_err(|e| anyhow::anyhow!("composio client unavailable: {e}"))?;
 
     // `comm/in/<username>` — LinkedIn's own notification emails always use
@@ -538,25 +472,14 @@ async fn search_gmail_for_linkedin(config: &Config) -> anyhow::Result<Option<Str
         "query": "from:linkedin.com",
         "max_results": 10,
     });
-    let resp = match &client_kind {
-        ComposioClientKind::Backend(client) => client
-            .execute_tool("GMAIL_FETCH_EMAILS", Some(args))
-            .await
-            .map_err(|e| anyhow::anyhow!("GMAIL_FETCH_EMAILS failed: {e:#}"))?,
-        ComposioClientKind::Direct(direct) => {
-            tracing::debug!(
-                "[linkedin_enrichment][composio-direct] GMAIL_FETCH_EMAILS via direct tenant"
-            );
-            direct_execute(
-                direct,
-                "GMAIL_FETCH_EMAILS",
-                Some(args),
-                &config.composio.entity_id,
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("GMAIL_FETCH_EMAILS (direct) failed: {e:#}"))?
-        }
-    };
+    let resp = direct_execute(
+        &direct,
+        "GMAIL_FETCH_EMAILS",
+        Some(args),
+        &config.composio.entity_id,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("GMAIL_FETCH_EMAILS failed: {e:#}"))?;
 
     if !resp.successful {
         let err = resp.error.unwrap_or_else(|| "unknown error".into());
@@ -630,55 +553,6 @@ async fn search_gmail_for_linkedin(config: &Config) -> anyhow::Result<Option<Str
     Ok(None)
 }
 
-/// Call the Apify LinkedIn profile scraper synchronously and return the
-/// first profile item from the dataset.
-pub async fn scrape_linkedin_profile(
-    client: &Arc<IntegrationClient>,
-    profile_url: &str,
-) -> anyhow::Result<serde_json::Value> {
-    let body = json!({
-        "actorId": LINKEDIN_SCRAPER_ACTOR,
-        "input": {
-            "profileUrls": [profile_url],
-        },
-        "sync": true,
-        "timeoutSecs": 120,
-    });
-
-    tracing::debug!(
-        actor = LINKEDIN_SCRAPER_ACTOR,
-        url_len = profile_url.len(),
-        "[linkedin_enrichment] invoking Apify actor"
-    );
-
-    // The backend wraps the Apify response in its standard envelope.
-    // `IntegrationClient::post` already unwraps `{ success, data }`.
-    let resp: serde_json::Value = client
-        .post("/agent-integrations/apify/run", &body)
-        .await
-        .map_err(|e| anyhow::anyhow!("Apify run failed: {e:#}"))?;
-
-    let status = resp
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("UNKNOWN");
-
-    if status != "SUCCEEDED" {
-        anyhow::bail!("Apify run finished with status: {status}");
-    }
-
-    // Extract the first item from the inline results array.
-    let items = resp
-        .get("items")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow::anyhow!("Apify run returned no items array"))?;
-
-    items
-        .first()
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("Apify run returned an empty items array"))
-}
-
 /// Build a local memory client for profile persistence.
 fn build_memory_client() -> anyhow::Result<crate::openhuman::memory::store::MemoryClient> {
     crate::openhuman::memory::store::MemoryClient::new_local()
@@ -705,9 +579,8 @@ async fn persist_linkedin_profile(
             &content,
             Some("onboarding-linkedin-enrichment".into()),
             Some(json!({
-                "source": "apify-linkedin-scraper",
+                "source": "linkedin-profile-data",
                 "url": url,
-                "actor": LINKEDIN_SCRAPER_ACTOR,
             })),
             Some("high".into()),
             None, // created_at

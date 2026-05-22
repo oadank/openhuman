@@ -31,10 +31,6 @@ vi.mock('../../../components/walkthrough/AppWalkthrough', () => ({
 
 vi.mock('../../../providers/CoreStateProvider', () => ({ useCoreState: vi.fn() }));
 
-vi.mock('../../../services/api/userApi', () => ({
-  userApi: { onboardingComplete: vi.fn().mockResolvedValue(undefined) },
-}));
-
 // [#1123] chatSend should NOT be called — walkthrough replaced welcome-agent
 vi.mock('../../../services/chatService', () => ({
   chatSend: vi.fn().mockResolvedValue(undefined),
@@ -116,9 +112,6 @@ async function setupLayout() {
     },
     isBootstrapping: false,
     isReady: true,
-    teams: [],
-    teamMembersById: {},
-    teamInvitesById: {},
     setOnboardingCompletedFlag: mockSetOnboardingCompletedFlag,
     setOnboardingTasks: mockSetOnboardingTasks,
     refreshSnapshot: vi.fn(),

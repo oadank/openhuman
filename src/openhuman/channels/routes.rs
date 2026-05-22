@@ -172,7 +172,7 @@ pub(crate) async fn get_or_create_provider(
     }
 
     let (inference_url, backend_url) = if provider_name == ctx.default_provider.as_str() {
-        (ctx.inference_url.as_deref(), ctx.api_url.as_deref())
+        (ctx.inference_url.as_deref(), None)
     } else {
         (None, None)
     };

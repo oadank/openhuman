@@ -103,10 +103,7 @@ for i in $(seq 1 30); do
   fi
   sleep 1
 done
-echo "[rust-e2e] Mock backend healthy."
-
-export BACKEND_URL="$MOCK_API_URL"
-export VITE_BACKEND_URL="$MOCK_API_URL"
+echo "[rust-e2e] Mock API healthy."
 
 cd "$REPO_ROOT"
 source "$HOME/.cargo/env" 2>/dev/null || true

@@ -12,8 +12,6 @@ pub enum CapabilityCategory {
     Skills,
     #[serde(rename = "local_ai")]
     LocalAI,
-    #[serde(rename = "team")]
-    Team,
     #[serde(rename = "settings")]
     Settings,
     #[serde(rename = "auth")]
@@ -27,12 +25,11 @@ pub enum CapabilityCategory {
 }
 
 impl CapabilityCategory {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::Conversation,
         Self::Intelligence,
         Self::Skills,
         Self::LocalAI,
-        Self::Team,
         Self::Settings,
         Self::Auth,
         Self::ScreenIntelligence,
@@ -46,7 +43,6 @@ impl CapabilityCategory {
             Self::Intelligence => "intelligence",
             Self::Skills => "skills",
             Self::LocalAI => "local_ai",
-            Self::Team => "team",
             Self::Settings => "settings",
             Self::Auth => "auth",
             Self::ScreenIntelligence => "screen_intelligence",
@@ -66,7 +62,6 @@ impl FromStr for CapabilityCategory {
             "intelligence" => Ok(Self::Intelligence),
             "skills" => Ok(Self::Skills),
             "local_ai" | "local-ai" | "local ai" | "localai" => Ok(Self::LocalAI),
-            "team" => Ok(Self::Team),
             "settings" => Ok(Self::Settings),
             "auth" => Ok(Self::Auth),
             "screen_intelligence" | "screen-intelligence" | "screen intelligence" => {
@@ -223,8 +218,8 @@ mod tests {
             CapabilityCategory::Conversation
         );
         assert_eq!(
-            "  Team  ".parse::<CapabilityCategory>().unwrap(),
-            CapabilityCategory::Team
+            "  settings  ".parse::<CapabilityCategory>().unwrap(),
+            CapabilityCategory::Settings
         );
     }
 

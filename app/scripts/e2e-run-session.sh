@@ -51,15 +51,12 @@ else
   echo "[runner] Using OPENHUMAN_WORKSPACE from environment: $OPENHUMAN_WORKSPACE"
 fi
 
-# Place the CEF cache directory OUTSIDE the workspace. By default the Tauri
-# shell roots it under `$OPENHUMAN_WORKSPACE/users/<id>/cef`, but our
-# `mega-flow` spec calls `openhuman.config_reset_local_data` between
-# sub-scenarios — that RPC does `remove_dir_all($OPENHUMAN_WORKSPACE)`,
-# which yanks CEF's cache out from under the running process and kills
-# the WebDriver session (every later sub-test then fails with
-# "invalid session id"). Pointing CEF at a sibling tmpdir via the
+# Place the CEF cache directory OUTSIDE the workspace. Some E2E specs reset
+# local app data between scenarios; if CEF's cache lives inside the workspace,
+# a reset can remove files from under the running renderer and kill the
+# WebDriver session. Pointing CEF at a sibling tmpdir via the
 # `OPENHUMAN_CEF_CACHE_PATH` escape hatch (`cef_profile.rs:7`) keeps it
-# unaffected by the reset.
+# unaffected by workspace resets.
 if [ -z "${OPENHUMAN_CEF_CACHE_PATH:-}" ]; then
   OPENHUMAN_CEF_CACHE_PATH="$(mktemp -d)"
   CREATED_TEMP_CEF_CACHE="$OPENHUMAN_CEF_CACHE_PATH"
@@ -133,8 +130,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-export VITE_BACKEND_URL="http://127.0.0.1:${E2E_MOCK_PORT}"
-export BACKEND_URL="http://127.0.0.1:${E2E_MOCK_PORT}"
 export APPIUM_PORT
 export CEF_CDP_PORT
 

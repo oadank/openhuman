@@ -73,12 +73,10 @@ graph TB
         Web["Web Client\n(React — browser)"]
     end
 
-    Backend["tinyhumans.ai\nBackend API"]
-
     Desktop -- "HTTP JSON-RPC\n(bearer auth)" --> Core
     Mobile -- "HTTP JSON-RPC\n(bearer auth)" --> Core
     Web -- "HTTP JSON-RPC\n(bearer auth)" --> Core
-    Core --> Backend
+    Core -- "Direct user-owned APIs\n(native OAuth / BYO keys)" --> Providers["Providers\nGoogle · GitHub · Composio · LLMs"]
 ```
 
 ### Quick-start (server)
@@ -96,7 +94,7 @@ docker run -d \
   ghcr.io/tinyhumansai/openhuman-core:latest
 ```
 
-See [`deploy/self-hosted/docker-compose.yml`](./deploy/self-hosted/docker-compose.yml) and [`gitbooks/features/cloud-deploy.md`](./gitbooks/features/cloud-deploy.md) for the full deployment reference.
+See [`docker-compose.yml`](./docker-compose.yml) and [`gitbooks/features/cloud-deploy.md`](./gitbooks/features/cloud-deploy.md) for the local standalone-core reference.
 
 ---
 
@@ -136,7 +134,7 @@ New contributor? Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the fork/
 2. Fork and clone the repo, then run `git submodule update --init --recursive` before `pnpm install` so the vendored Tauri/CEF sources are present.
 3. Use `pnpm dev` for web-only UI work, `pnpm --filter openhuman-app dev:app` for the desktop shell, and focused checks such as `pnpm typecheck`, `pnpm format:check`, and `cargo check -p openhuman --lib` before opening a PR.
 
-Deeper docs: [Architecture](https://tinyhumans.gitbook.io/openhuman/developing/architecture) · [Getting Set Up](https://tinyhumans.gitbook.io/openhuman/developing/getting-set-up) · [Cloud Deploy](./gitbooks/features/cloud-deploy.md).
+Deeper docs: [Architecture](https://tinyhumans.gitbook.io/openhuman/developing/architecture) · [Getting Set Up](https://tinyhumans.gitbook.io/openhuman/developing/getting-set-up) · [Local Core Deploy](./gitbooks/features/cloud-deploy.md).
 
 ## Context in minutes, not weeks
 

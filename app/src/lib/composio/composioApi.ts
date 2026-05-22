@@ -2,10 +2,9 @@
  * Imperative RPC wrapper for the Composio domain — typed counterpart
  * to `src/openhuman/composio/*` on the Rust side.
  *
- * Every function here calls the core sidecar via JSON-RPC. The core
- * in turn proxies to the openhuman backend's
- * `/agent-integrations/composio/*` routes, so the frontend never talks
- * to Composio directly and never handles the API key.
+ * Every function here calls the in-process core via JSON-RPC. The core
+ * talks to Composio directly with the user's stored API key, so the
+ * frontend never handles that secret.
  *
  * Keep this file stylistically consistent with the other RPC wrappers
  * in `app/src/utils/tauriCommands` so the domain stays easy to grok.

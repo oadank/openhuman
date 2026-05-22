@@ -6,8 +6,8 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    build_http_schema_dump, default_state, escape_html, invoke_method, is_param_validation_error,
-    is_session_expired_error, params_to_object, parse_json_params, rpc_handler, type_name,
+    build_http_schema_dump, default_state, invoke_method, is_param_validation_error,
+    params_to_object, parse_json_params, rpc_handler, type_name,
 };
 
 struct EnvVarGuard {
@@ -200,14 +200,6 @@ async fn invoke_autocomplete_status_rejects_unknown_param() {
 }
 
 #[tokio::test]
-async fn invoke_auth_store_session_missing_token_fails_validation() {
-    let err = invoke_method(default_state(), "openhuman.auth_store_session", json!({}))
-        .await
-        .expect_err("missing token should fail");
-    assert!(err.contains("missing required param 'token'"));
-}
-
-#[tokio::test]
 async fn invoke_service_status_rejects_unknown_param() {
     let err = invoke_method(
         default_state(),
@@ -354,43 +346,6 @@ fn parse_json_params_reports_error_message() {
 }
 
 #[test]
-fn is_session_expired_error_matches_401_unauthorized() {
-    assert!(is_session_expired_error(
-        "backend returned 401 Unauthorized"
-    ));
-    assert!(is_session_expired_error("401 UNAUTHORIZED"));
-    assert!(is_session_expired_error("got 401 and unauthorized body"));
-}
-
-#[test]
-fn is_session_expired_error_requires_both_401_and_unauthorized() {
-    // 401 alone is not sufficient — could be HTTP/3.01 nonsense or
-    // unrelated text. We require the string "unauthorized" too.
-    assert!(!is_session_expired_error("server returned 401"));
-    assert!(!is_session_expired_error("unauthorized without code"));
-}
-
-#[test]
-fn is_session_expired_error_matches_invalid_token_case_insensitive() {
-    assert!(is_session_expired_error("Invalid Token"));
-    assert!(is_session_expired_error("got an invalid token here"));
-}
-
-#[test]
-fn is_session_expired_error_matches_session_expired_sentinel() {
-    // The SESSION_EXPIRED sentinel is case-sensitive by design.
-    assert!(is_session_expired_error("SESSION_EXPIRED: please re-auth"));
-    assert!(!is_session_expired_error("session_expired lowercase"));
-}
-
-#[test]
-fn is_session_expired_error_does_not_match_unrelated_errors() {
-    assert!(!is_session_expired_error("network timeout"));
-    assert!(!is_session_expired_error("500 internal server error"));
-    assert!(!is_session_expired_error(""));
-}
-
-#[test]
 fn is_param_validation_error_matches_the_three_validator_shapes() {
     // Regression guard for OPENHUMAN-TAURI-20: pre-#1467 cores rejected
     // `api_key` because it wasn't in the schema yet. The error string
@@ -424,25 +379,6 @@ fn is_param_validation_error_does_not_match_unrelated_errors() {
     assert!(!is_param_validation_error(
         "rpc failed: unknown param 'x' for ns.fn"
     ));
-}
-
-#[test]
-fn is_session_expired_error_matches_missing_backend_session_token() {
-    // Composio / web search / billing / team / webhooks / referral all surface
-    // a "no backend session token" variant when the auth profile is gone. Each
-    // of these should funnel into the auto-cleanup path instead of being
-    // reported to Sentry as a fresh error on every 5 s poll.
-    assert!(is_session_expired_error(
-        "composio unavailable: no backend session token. Sign in first (auth_store_session)."
-    ));
-    assert!(is_session_expired_error(
-        "no backend session token; run auth_store_session first"
-    ));
-    assert!(is_session_expired_error(
-        "Web search unavailable: no backend session token. Sign in first so the server can proxy search."
-    ));
-    // Case-insensitive match — the helper lowercases first.
-    assert!(is_session_expired_error("NO BACKEND SESSION TOKEN"));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -588,46 +524,6 @@ async fn thread_not_found_rpc_error_does_not_report_to_sentry() {
         events[0].tags.get("method").map(String::as_str),
         Some("core.not_a_real_method")
     );
-}
-
-#[test]
-fn is_session_expired_error_matches_session_jwt_required() {
-    // Regression: Sentry issue 7472592145.
-    // A prior 401 clears the stored JWT; the very next RPC call (e.g.
-    // channels_telegram_login_start) finds no token and returns "session JWT
-    // required; complete login first". This is the same auth-boundary condition
-    // and must not be reported to Sentry.
-    assert!(is_session_expired_error(
-        "session JWT required; complete login first"
-    ));
-    assert!(is_session_expired_error(
-        "session JWT required; complete login and store_session first"
-    ));
-    assert!(is_session_expired_error("session JWT required"));
-    // Case-insensitive.
-    assert!(is_session_expired_error("SESSION JWT REQUIRED"));
-}
-
-#[test]
-fn escape_html_escapes_all_special_chars() {
-    let raw = r#"<script>alert("x&y'z")</script>"#;
-    let escaped = escape_html(raw);
-    assert!(!escaped.contains('<'));
-    assert!(!escaped.contains('>'));
-    assert!(!escaped.contains('"'));
-    assert!(!escaped.contains('\''));
-    assert!(escaped.contains("&lt;"));
-    assert!(escaped.contains("&gt;"));
-    assert!(escaped.contains("&quot;"));
-    assert!(escaped.contains("&#x27;"));
-    // `&` must be escaped first so later substitutions don't double-encode.
-    assert!(escaped.contains("&amp;y"));
-}
-
-#[test]
-fn escape_html_is_noop_for_safe_text() {
-    assert_eq!(escape_html("safe text 123"), "safe text 123");
-    assert_eq!(escape_html(""), "");
 }
 
 // --- invoke_method parameter-shape errors ---------------------------------

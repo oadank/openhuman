@@ -11,10 +11,6 @@ export type SettingsRoute =
   | 'screen-intelligence'
   | 'autocomplete'
   | 'privacy'
-  | 'billing'
-  | 'team'
-  | 'team-members'
-  | 'team-invites'
   | 'developer-options'
   | 'ai'
   | 'llm'
@@ -47,7 +43,6 @@ export interface BreadcrumbItem {
 interface SettingsNavigationHook {
   currentRoute: SettingsRoute;
   navigateToSettings: (route?: SettingsRoute | string) => void;
-  navigateToTeamManagement: (teamId: string) => void;
   navigateBack: () => void;
   closeSettings: () => void;
   breadcrumbs: BreadcrumbItem[];
@@ -72,14 +67,6 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
   // Determine current settings route from URL
   const getCurrentRoute = (): SettingsRoute => {
     const path = location.pathname;
-    // Check specific team management paths first (more specific)
-    if (path.includes('/settings/team/manage/') && path.includes('/members')) return 'team-members';
-    if (path.includes('/settings/team/manage/') && path.includes('/invites')) return 'team-invites';
-    if (path.includes('/settings/team/manage/')) return 'team';
-    // Then check regular team paths (less specific)
-    if (path.includes('/settings/team/members')) return 'team-members';
-    if (path.includes('/settings/team/invites')) return 'team-invites';
-    if (path.includes('/settings/team')) return 'team';
     if (path.includes('/settings/account')) return 'account';
     if (path.includes('/settings/features')) return 'features';
     if (path.includes('/settings/connections')) return 'connections';
@@ -90,7 +77,6 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
     if (path.includes('/settings/autocomplete-debug')) return 'autocomplete-debug';
     if (path.includes('/settings/autocomplete')) return 'autocomplete';
     if (path.includes('/settings/privacy')) return 'privacy';
-    if (path.includes('/settings/billing')) return 'billing';
     if (path.includes('/settings/developer-options')) return 'developer-options';
     if (path.includes('/settings/llm')) return 'llm';
     if (path.includes('/settings/ai')) return 'ai';
@@ -131,13 +117,6 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
     [navigate]
   );
 
-  const navigateToTeamManagement = useCallback(
-    (teamId: string) => {
-      navigate(`/settings/team/manage/${teamId}`);
-    },
-    [navigate]
-  );
-
   const navigateBack = useCallback(() => {
     if (currentRoute === 'home') {
       goBackWithFallback('/home');
@@ -164,8 +143,6 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
 
   const aiCrumb: BreadcrumbItem = { label: 'AI', onClick: () => navigate('/settings/ai') };
 
-  const teamCrumb: BreadcrumbItem = { label: 'Team', onClick: () => navigate('/settings/team') };
-
   const developerCrumb: BreadcrumbItem = {
     label: 'Developer Options',
     onClick: () => navigate('/settings/developer-options'),
@@ -181,13 +158,9 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
 
       // Leaf panels under account
       case 'recovery-phrase':
-      case 'team':
       case 'connections':
       case 'privacy':
         return [settingsCrumb, accountCrumb];
-
-      case 'billing':
-        return [settingsCrumb];
 
       // Leaf panels under features
       case 'screen-intelligence':
@@ -200,11 +173,6 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
       case 'voice':
       case 'llm':
         return [settingsCrumb, aiCrumb];
-
-      // Team sub-pages
-      case 'team-members':
-      case 'team-invites':
-        return [settingsCrumb, accountCrumb, teamCrumb];
 
       // Developer sub-pages
       case 'agent-chat':
@@ -251,7 +219,6 @@ export const useSettingsNavigation = (): SettingsNavigationHook => {
   return {
     currentRoute,
     navigateToSettings,
-    navigateToTeamManagement,
     navigateBack,
     closeSettings,
     breadcrumbs,

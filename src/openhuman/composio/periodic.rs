@@ -8,21 +8,14 @@
 //!
 //! ## Direct mode (`[composio-direct]`)
 //!
-//! As of #1710 Wave 1, the scheduler is **mode-aware**: it resolves the
-//! client via [`create_composio_client`] each tick so a direct-mode
-//! user's personal Composio v3 tenant gets walked (via
-//! `direct_list_connections`) instead of returning an empty list from
-//! the tinyhumans tenant. The per-connection sync calls go through
-//! [`ProviderContext::execute`] which is itself mode-aware.
+//! The scheduler resolves the client via [`create_composio_client`] each tick
+//! so the user's personal Composio v3 tenant gets walked via
+//! `direct_list_connections`. Per-connection sync calls go through
+//! [`ProviderContext::execute`], which resolves the direct client per call.
 //!
-//! Real-time trigger webhooks (`composio:trigger` socket.io events
-//! fanned out from `wss://api.tinyhumans.ai`) still do not reach the
-//! core when `config.composio.mode == "direct"`, because the backend
-//! HMAC-verifies the Composio webhook and pushes it down a per-user
-//! socket — direct-mode users see synchronous tool execution and
-//! periodic poll-based sync, but not async trigger pushes in this
-//! release. See the `composio.direct_mode_triggers_gap` capability
-//! entry in `about_app/catalog.rs` for the user-visible status.
+//! Real-time trigger webhooks are delivered through the local Composio webhook
+//! receiver when configured; periodic sync remains the fallback for providers
+//! that support polling.
 //!
 //! Design notes:
 //!
@@ -143,37 +136,26 @@ async fn run_loop() {
 /// Run a single scheduler tick. Public-ish (`pub(crate)`) so the test
 /// module can drive ticks without spinning up the real `interval`.
 pub(crate) async fn run_one_tick() -> Result<(), String> {
-    // Step 1: load config (also gives us the auth token via the
-    // shared integrations client builder).
+    // Step 1: load config.
     let config = config_rpc::load_config_with_timeout()
         .await
         .map_err(|e| format!("load_config: {e}"))?;
     let config = Arc::new(config);
 
-    // Step 2: list active connections — mode-aware. Backend mode walks
-    // the tinyhumans tenant; direct mode walks the user's personal
-    // Composio v3 tenant. Mirrors `ops::composio_list_connections` so
-    // direct-mode users get periodic sync against their own connections
-    // instead of seeing an empty list (#1710).
-    let kind = match create_composio_client(&config) {
-        Ok(kind) => kind,
+    // Step 2: list active connections from the user's direct Composio tenant.
+    let direct = match create_composio_client(&config) {
+        Ok(ComposioClientKind::Direct(direct)) => direct,
         Err(e) => {
             tracing::debug!(
                 error = %e,
-                "[composio:periodic] no client (not signed in? no direct key?), skipping tick"
+                "[composio:periodic] no direct client, skipping tick"
             );
             return Ok(());
         }
     };
-    let resp = match &kind {
-        ComposioClientKind::Backend(client) => client
-            .list_connections()
-            .await
-            .map_err(|e| format!("list_connections (backend): {e}"))?,
-        ComposioClientKind::Direct(direct) => direct_list_connections(direct)
-            .await
-            .map_err(|e| format!("list_connections (direct): {e:#}"))?,
-    };
+    let resp = direct_list_connections(&direct)
+        .await
+        .map_err(|e| format!("list_connections: {e:#}"))?;
 
     let sync_map = last_sync_map();
 

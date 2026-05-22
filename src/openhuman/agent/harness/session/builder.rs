@@ -952,7 +952,7 @@ impl Agent {
                 {
                     Some(Arc::from(provider::create_routed_provider(
                         config.inference_url.as_deref(),
-                        config.api_url.as_deref(),
+                        None,
                         config.api_key.as_deref(),
                         &config.reliability,
                         &config.model_routes,

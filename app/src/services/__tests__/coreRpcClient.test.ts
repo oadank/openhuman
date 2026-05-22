@@ -502,16 +502,9 @@ describe('coreRpcClient', () => {
 
 describe('classifyRpcError', () => {
   test.each([
-    ['GET /teams failed (401 Unauthorized): {"success":false}', undefined, 'auth_expired'],
+    ['GET /threads failed (401 Unauthorized): {"success":false}', undefined, 'auth_expired'],
     ['Session expired. Please log in again.', undefined, 'auth_expired'],
     ['some prefix Session expired suffix', undefined, 'auth_expired'],
-    [
-      'composio unavailable: no backend session token. Sign in first (auth_store_session).',
-      undefined,
-      'auth_expired',
-    ],
-    ['no backend session token; run auth_store_session first', undefined, 'auth_expired'],
-    ['NO BACKEND SESSION TOKEN', undefined, 'auth_expired'],
     ['HTTP 429 rate-limit exceeded', undefined, 'rate_limited'],
     ['Budget exceeded for current period', undefined, 'budget_exceeded'],
     ['Insufficient budget for request', undefined, 'budget_exceeded'],
@@ -562,12 +555,12 @@ describe('coreRpcClient — typed errors + auth-expired event', () => {
         id: 1,
         error: {
           code: -32000,
-          message: 'GET /teams failed (401 Unauthorized): Session expired. Please log in again.',
+          message: 'GET /threads failed (401 Unauthorized): Session expired. Please log in again.',
         },
       }),
     } as Response);
 
-    await expect(callCoreRpc({ method: 'openhuman.team_get_usage' })).rejects.toMatchObject({
+    await expect(callCoreRpc({ method: 'openhuman.threads_list' })).rejects.toMatchObject({
       name: 'CoreRpcError',
       kind: 'auth_expired',
     });
@@ -578,7 +571,7 @@ describe('coreRpcClient — typed errors + auth-expired event', () => {
       source: string;
     }>;
     expect(evt.type).toBe('core-rpc-auth-expired');
-    expect(evt.detail.method).toBe('openhuman.team_get_usage');
+    expect(evt.detail.method).toBe('openhuman.threads_list');
     expect(evt.detail.source).toBe('rpc');
   });
 
@@ -609,7 +602,7 @@ describe('coreRpcClient — typed errors + auth-expired event', () => {
       }),
     } as Response);
 
-    const err = await callCoreRpc({ method: 'openhuman.team_get_usage' }).catch(e => e);
+    const err = await callCoreRpc({ method: 'openhuman.threads_list' }).catch(e => e);
     expect(err).toBeInstanceOf(CoreRpcError);
     expect((err as CoreRpcError).kind).toBe('budget_exceeded');
     expect(authExpiredHandler).not.toHaveBeenCalled();
@@ -624,7 +617,7 @@ describe('coreRpcClient — typed errors + auth-expired event', () => {
       text: async () => 'rate-limit exceeded',
     } as Response);
 
-    const err = await callCoreRpc({ method: 'openhuman.team_get_usage' }).catch(e => e);
+    const err = await callCoreRpc({ method: 'openhuman.threads_list' }).catch(e => e);
     expect(err).toBeInstanceOf(CoreRpcError);
     expect((err as CoreRpcError).kind).toBe('rate_limited');
     expect((err as CoreRpcError).httpStatus).toBe(429);

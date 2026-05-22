@@ -122,7 +122,7 @@ fn drops_backend_api_transient_statuses() {
 fn drops_integrations_transient_transport_timeout() {
     let event = event_with_tags_and_message(
         &[("domain", "integrations"), ("failure", "transport")],
-        "GET /agent-integrations/tools failed: operation timed out",
+        "GET /integrations/tools failed: operation timed out",
     );
     assert_eq!(
         count_captured(vec![event]),

@@ -6,7 +6,7 @@
 # driver attached to CEF's CDP port. See e2e-run-session.sh.
 #
 # Usage (unchanged):
-#   ./app/scripts/e2e-run-spec.sh test/e2e/specs/login-flow.spec.ts [log-suffix]
+#   ./app/scripts/e2e-run-spec.sh test/e2e/specs/smoke.spec.ts [log-suffix]
 #
 set -euo pipefail
 

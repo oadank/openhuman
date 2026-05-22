@@ -71,7 +71,7 @@ const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     socketService.connect(handshakeToken);
     // The legacy `openhuman.socket_connect_with_session` RPC connected
     // the Rust core to the backend-alphahuman socket for inbound
-    // managed-DM routing. The OpenHuman backend is gone in this fork;
+    // managed-DM routing. The hosted app socket is gone in this fork;
     // calling that method now logs `unknown_method` and produces a
     // noisy "RPC connection failed" console error every launch. Skip
     // it. Channel managed-DM routing for Discord/Telegram is handled

@@ -5,9 +5,9 @@
 # next to this compose file.
 #
 # Usage:
-#   1. cp .env.example .env  (then edit values — at minimum BACKEND_URL and
-#      OPENHUMAN_CORE_TOKEN; the latter is required for any client that calls
-#      /rpc on this instance)
+#   1. cp .env.example .env  (then edit values — at minimum
+#      OPENHUMAN_CORE_TOKEN, required for any client that calls /rpc on this
+#      instance)
 #   2. docker compose up -d
 #   3. curl http://localhost:7788/health
 #

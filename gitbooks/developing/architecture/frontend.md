@@ -17,7 +17,7 @@ This is one consolidated reference. Use the table of contents above (or your rea
 | ------------------------------------------------- | --------------------------------------------- |
 | [Architecture](frontend.md#architecture-overview) | Provider chain, build, layout, conventions    |
 | [State Management](frontend.md#state-management)  | Redux Toolkit slices, selectors, persistence  |
-| [Services Layer](frontend.md#services-layer)      | `apiClient`, `socketService`, `coreRpcClient` |
+| [Services Layer](frontend.md#services-layer)      | `coreRpcClient`, `socketService`, `coreRpcClient` |
 | [Providers](frontend.md#providers)                | `User`, `Socket`, `AI`, `Skill` providers     |
 | [Pages & Routing](frontend.md#pages-routing)      | `HashRouter`, route guards, main routes       |
 | [Components](frontend.md#components)              | UI / settings component patterns              |
@@ -39,7 +39,7 @@ app/src/
 ├── main.tsx                # Entry (Sentry, store, styles)
 ├── store/                  # Redux slices and selectors
 ├── providers/              # UserProvider, SocketProvider, AIProvider, SkillProvider
-├── services/               # apiClient, socketService, coreRpcClient, api/*
+├── services/               # coreRpcClient, socketService, coreRpcClient, api/*
 ├── lib/                    # AI loaders, MCP helpers, skills sync, etc.
 ├── pages/                  # Route-level screens
 ├── components/             # Shared UI
@@ -55,7 +55,7 @@ app/src/
 OpenHuman’s desktop UI is a **React 19** app (`app/src/`) that:
 
 * Uses **Redux Toolkit** with persistence for session-related state
-* Connects to the backend with **REST** (`apiClient`) and **Socket.io** (`socketService`)
+* Connects to the backend with **REST** (`coreRpcClient`) and **Socket.io** (`socketService`)
 * Calls the **Rust core** process over HTTP via **`coreRpcClient`** / Tauri **`core_rpc_relay`** (JSON-RPC methods implemented in repo root `src/openhuman/`, exposed through `core_server`)
 * Loads **AI prompts** from bundled `src/openhuman/agent/prompts` (repo root) and from Tauri **`ai_get_config`** when packaged
 * Uses a **minimal MCP-style** helper layer under `lib/mcp/` (transport, validation), not a large in-repo Telegram MCP tool bundle
@@ -108,8 +108,8 @@ App.tsx
 
 ```
 services/
-  ├─ apiClient        → REST to a URL resolved at runtime via `services/backendUrl#getBackendUrl`
-  ├─ backendUrl       → Calls `openhuman.config_resolve_api_url`; falls back to VITE_BACKEND_URL only outside Tauri
+  ├─ coreRpcClient        → REST to a URL resolved at runtime via `services/coreRpcClient#getCoreRpcUrl`
+  ├─ coreRpcClient       → Calls `openhuman.app_state_snapshot`; falls back to VITE_CORE_RPC_URL only outside Tauri
   ├─ socketService    → Socket.io; realtime + MCP-style envelopes
   └─ coreRpcClient    → HTTP to local openhuman core (JSON-RPC), used with Tauri relay
 ```
@@ -123,9 +123,9 @@ The desktop app does not bake the core RPC URL or the API host into the bundle a
 3. **`VITE_OPENHUMAN_CORE_RPC_URL`**, build-time fallback for development.
 4. The hardcoded `http://127.0.0.1:7788/rpc` default.
 
-Once the RPC handshake succeeds, `services/backendUrl` calls `openhuman.config_resolve_api_url` to pull `api_url` (and other safe client fields) from the loaded core `Config`. `VITE_BACKEND_URL` is only used as a web fallback when the app runs outside Tauri.
+Once the RPC handshake succeeds, `services/coreRpcClient` calls `openhuman.app_state_snapshot` to pull `api_url` (and other safe client fields) from the loaded core `Config`. `VITE_CORE_RPC_URL` is only used as a web fallback when the app runs outside Tauri.
 
-Components that need the backend URL should call `useBackendUrl()` (or `getBackendUrl()` from non-React code), they must not import the static `BACKEND_URL` constant from `utils/config`, which represents the build-time value only.
+Components that need the core RPC URL should call `core RPC helpers` (or `core RPC helpers` from non-React code), they must not import the static `CORE_RPC_URL` constant from `utils/config`, which represents the build-time value only.
 
 ### Related docs
 
@@ -395,9 +395,9 @@ The application uses singleton services for external communication. This prevent
 
 ```
 app/src/services/
-  ├─ apiClient (HTTP REST)
+  ├─ coreRpcClient (HTTP REST)
   │   ├─ reads auth.token from Redux
-  │   └─ calls VITE_BACKEND_URL (see utils/config.ts)
+  │   └─ calls VITE_CORE_RPC_URL (see utils/config.ts)
   ├─ socketService (Socket.io)
   │   ├─ web: JS client
   │   └─ Tauri: coordinates with Rust-side socket via utils/tauriSocket.ts
@@ -406,7 +406,7 @@ app/src/services/
   └─ services/api/* - domain REST modules (auth, user, teams, …)
 ```
 
-### API Client (`services/apiClient.ts`)
+### API Client (`services/coreRpcClient.ts`)
 
 HTTP REST client for backend communication.
 
@@ -420,30 +420,30 @@ HTTP REST client for backend communication.
 #### Usage
 
 ```typescript
-import apiClient from "../services/apiClient";
+import coreRpcClient from "../services/coreRpcClient";
 
 // GET request
-const user = await apiClient.get<User>("/users/me");
+const user = await coreRpcClient.get<User>("/users/me");
 
 // POST request
-const result = await apiClient.post<LoginResponse>("/auth/login", {
+const result = await coreRpcClient.post<LoginResponse>("/auth/login", {
   email,
   password,
 });
 
 // With custom headers
-const data = await apiClient.get<Data>("/endpoint", {
+const data = await coreRpcClient.get<Data>("/endpoint", {
   headers: { "X-Custom": "value" },
 });
 ```
 
 #### Configuration
 
-Reads `VITE_BACKEND_URL` from environment or uses default:
+Reads `VITE_CORE_RPC_URL` from environment or uses default:
 
 ```typescript
-const BACKEND_URL =
-  import.meta.env.VITE_BACKEND_URL || "https://api.example.com";
+const CORE_RPC_URL =
+  import.meta.env.VITE_CORE_RPC_URL || "https://api.example.com";
 ```
 
 ### API Endpoints (`services/api/`)
@@ -556,7 +556,7 @@ useEffect(() => {
 #### Configuration
 
 ```typescript
-const socket = io(BACKEND_URL, {
+const socket = io(CORE_RPC_URL, {
   auth: { token },
   transports: ["polling", "websocket"],
   reconnection: true,
@@ -999,7 +999,7 @@ Authentication page.
 export function Login() {
   const handleTelegramLogin = () => {
     // Opens Telegram OAuth in system browser
-    openUrl(`${BACKEND_URL}/auth/telegram?platform=desktop`);
+    openUrl(`${CORE_RPC_URL}/auth/telegram?platform=desktop`);
   };
 
   return (
@@ -1361,7 +1361,7 @@ interface TelegramLoginButtonProps {
 
 // Usage
 <TelegramLoginButton
-  onClick={() => openUrl(`${BACKEND_URL}/auth/telegram?platform=desktop`)}
+  onClick={() => openUrl(`${CORE_RPC_URL}/auth/telegram?platform=desktop`)}
 />
 ```
 
@@ -1946,11 +1946,11 @@ function SettingsModal() {
 
 #### Configuration (`utils/config.ts`)
 
-Build-time environment variable access. These constants only carry the value that was baked into the bundle, for the **runtime** URL the app actually talks to, see `services/backendUrl` and `hooks/useBackendUrl` below.
+Build-time environment variable access. These constants only carry the value that was baked into the bundle, for the **runtime** URL the app actually talks to, see `services/coreRpcClient` and `hooks/useBackendUrl` below.
 
 ```typescript
 // Build-time fallback only (used outside Tauri).
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://api.example.com';
+export const CORE_RPC_URL = import.meta.env.VITE_CORE_RPC_URL || 'https://api.example.com';
 
 // Debug mode
 export const DEBUG = import.meta.env.VITE_DEBUG === 'true';
@@ -1966,16 +1966,16 @@ if (DEBUG) {
 }
 ```
 
-> **Do not** import `BACKEND_URL` directly to make API calls. Resolve the URL at runtime so the core sidecar's `api_url` (set on the login screen via `openhuman.config_resolve_api_url`) takes effect:
+> **Do not** import `CORE_RPC_URL` directly to make API calls. Resolve the URL at runtime so the core sidecar's `api_url` (set on the login screen via `openhuman.app_state_snapshot`) takes effect:
 >
 > ```typescript
 > // React components
 > import { useBackendUrl } from '../hooks/useBackendUrl';
-> const backendUrl = useBackendUrl();
+> const coreRpcClient = core RPC helpers;
 >
 > // Non-React code
-> import { getBackendUrl } from '../services/backendUrl';
-> const backendUrl = await getBackendUrl();
+> import { getCoreRpcUrl } from '../services/coreRpcClient';
+> const coreRpcClient = await core RPC helpers;
 > ```
 
 #### Deep Link (`utils/deeplink.ts`)
@@ -2267,7 +2267,7 @@ try {
 Use TypeScript generics for API calls:
 
 ```typescript
-const user = await apiClient.get<User>('/users/me');
+const user = await coreRpcClient.get<User>('/users/me');
 // user is typed as User
 ```
 

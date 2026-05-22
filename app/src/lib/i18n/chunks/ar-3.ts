@@ -312,7 +312,6 @@ const ar3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'تخطي في الوقت الحالي',
   'app.openhumanLink.telegramUnavailable': 'Telegram غير متاح',
   'app.openhumanLink.title.accounts': 'ربط تطبيقاتك',
-  'app.openhumanLink.title.billing': 'الفوترة والرصيد',
   'app.openhumanLink.title.discord': 'الانضمام إلى المجتمع',
   'app.openhumanLink.title.messaging': 'ربط قناة محادثة',
   'app.openhumanLink.title.notifications': 'السماح بالإشعارات',

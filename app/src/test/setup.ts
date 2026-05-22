@@ -31,12 +31,10 @@ function readMockApiPort() {
 const mockApiServer = await startMockServer(readMockApiPort(), { retryIfInUse: true });
 const mockApiUrl = `http://localhost:${mockApiServer.port}`;
 process.env.VITEST_MOCK_API_URL = mockApiUrl;
-process.env.VITE_BACKEND_URL = mockApiUrl;
 
 // Mock import.meta.env defaults for tests
 vi.stubEnv('DEV', true);
 vi.stubEnv('MODE', 'test');
-vi.stubEnv('VITE_BACKEND_URL', mockApiUrl);
 
 function createStorageMock(): Storage {
   const store = new Map<string, string>();
@@ -123,8 +121,6 @@ vi.mock('@tauri-apps/plugin-os', () => ({ platform: vi.fn().mockResolvedValue('m
 // Mock tauriCommands to prevent Tauri API calls in tests
 vi.mock('../utils/tauriCommands', () => ({
   isTauri: vi.fn(() => false),
-  storeSession: vi.fn().mockResolvedValue(undefined),
-  getSessionToken: vi.fn().mockResolvedValue(null),
   getAuthState: vi.fn().mockResolvedValue({ is_authenticated: false }),
   logout: vi.fn().mockResolvedValue(undefined),
   syncMemoryClientToken: vi.fn().mockResolvedValue(undefined),
@@ -145,7 +141,6 @@ vi.mock('../utils/tauriCommands', () => ({
   openhumanGetMeetSettings: vi
     .fn()
     .mockResolvedValue({ result: { auto_orchestrator_handoff: false }, logs: [] }),
-  exchangeToken: vi.fn(),
   invoke: vi.fn(),
 }));
 
@@ -161,17 +156,12 @@ vi.mock('../utils/config', () => ({
   DEV_FORCE_ONBOARDING: false,
   SKILLS_GITHUB_REPO: 'test/skills',
   SENTRY_DSN: undefined,
-  BACKEND_URL: mockApiUrl,
   TELEGRAM_BOT_USERNAME: 'openhuman_bot',
   LATEST_APP_DOWNLOAD_URL: 'https://github.com/tinyhumansai/openhuman/releases/latest',
   APP_VERSION: '0.0.0-test',
   DEV_JWT_TOKEN: undefined,
   MASCOT_VOICE_ID: 'JBFqnCBsd6RMkjVDRZzb',
   MASCOT_VOICE_MODEL_ID: 'eleven_multilingual_v2',
-}));
-
-vi.mock('../services/backendUrl', () => ({
-  getBackendUrl: vi.fn().mockImplementation(() => Promise.resolve(mockApiUrl)),
 }));
 
 // Mock redux-persist to avoid CJS/ESM issues in vitest

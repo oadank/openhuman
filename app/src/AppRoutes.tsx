@@ -7,10 +7,8 @@ import Accounts from './pages/Accounts';
 import Channels from './pages/Channels';
 import Home from './pages/Home';
 import Intelligence from './pages/Intelligence';
-import Invites from './pages/Invites';
 import Notifications from './pages/Notifications';
 import Onboarding from './pages/onboarding/Onboarding';
-import Rewards from './pages/Rewards';
 import Settings from './pages/Settings';
 import Skills from './pages/Skills';
 
@@ -97,28 +95,10 @@ const AppRoutes = () => {
       />
 
       <Route
-        path="/invites"
-        element={
-          <ProtectedRoute>
-            <Invites />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
         path="/notifications"
         element={
           <ProtectedRoute>
             <Notifications />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/rewards"
-        element={
-          <ProtectedRoute>
-            <Rewards />
           </ProtectedRoute>
         }
       />

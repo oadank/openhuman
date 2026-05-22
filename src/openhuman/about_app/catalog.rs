@@ -11,10 +11,10 @@ const LOCAL_RAW: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
     destinations: &[],
 });
 
-const DERIVED_TO_BACKEND: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
+const DERIVED_TO_LLM_PROVIDER: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
     leaves_device: true,
     data_kind: PrivacyDataKind::Derived,
-    destinations: &["OpenHuman backend", "TinyHumans Neocortex"],
+    destinations: &["Configured LLM provider"],
 });
 
 const LOCAL_CREDENTIALS: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
@@ -23,10 +23,10 @@ const LOCAL_CREDENTIALS: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
     destinations: &[],
 });
 
-const DIAGNOSTICS_TO_BACKEND: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
+const DIAGNOSTICS_TO_SENTRY: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
     leaves_device: true,
     data_kind: PrivacyDataKind::Diagnostics,
-    destinations: &["OpenHuman backend"],
+    destinations: &["Sentry"],
 });
 
 const MODEL_DOWNLOAD: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
@@ -48,7 +48,7 @@ const GITHUB_RELEASES_METADATA: Option<CapabilityPrivacy> = Some(CapabilityPriva
 });
 
 // Direct-mode Composio: the user's API key and tool arguments leave the
-// device — they are sent to backend.composio.dev, not the OpenHuman backend.
+// device — they are sent to backend.composio.dev.
 // LOCAL_CREDENTIALS was incorrect here because leaves_device must be true.
 const COMPOSIO_DIRECT_CREDENTIALS: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
     leaves_device: true,
@@ -75,7 +75,7 @@ const CAPABILITIES: &[Capability] = &[
         description: "Send typed messages to the assistant in a conversation.",
         how_to: "Conversations > Message composer",
         status: CapabilityStatus::Stable,
-        privacy: DERIVED_TO_BACKEND,
+        privacy: DERIVED_TO_LLM_PROVIDER,
     },
     Capability {
         id: "conversation.prompt_injection_guard",
@@ -85,7 +85,7 @@ const CAPABILITIES: &[Capability] = &[
         description: "Detect and block prompt-injection attempts before agent/model execution.",
         how_to: "Conversations > Message composer",
         status: CapabilityStatus::Stable,
-        privacy: DERIVED_TO_BACKEND,
+        privacy: DERIVED_TO_LLM_PROVIDER,
     },
     Capability {
         id: "conversation.send_voice",
@@ -95,7 +95,7 @@ const CAPABILITIES: &[Capability] = &[
         description: "Record or attach voice input and send it as a message.",
         how_to: "Conversations > Voice input",
         status: CapabilityStatus::Beta,
-        privacy: DERIVED_TO_BACKEND,
+        privacy: DERIVED_TO_LLM_PROVIDER,
     },
     Capability {
         id: "conversation.inline_autocomplete",
@@ -165,7 +165,7 @@ const CAPABILITIES: &[Capability] = &[
         description: "Extract and summarize actionable items from your activity and conversations.",
         how_to: "Intelligence",
         status: CapabilityStatus::Stable,
-        privacy: DERIVED_TO_BACKEND,
+        privacy: DERIVED_TO_LLM_PROVIDER,
     },
     Capability {
         id: "intelligence.filter_actionable_items",
@@ -294,7 +294,7 @@ const CAPABILITIES: &[Capability] = &[
         description: "When a delegated sub-task is long or complex, the orchestrator can route it into a fresh worker-labeled conversation thread instead of flooding the parent thread. The user opens the worker thread from the thread list (or via the reference card in the parent) to read the sub-agent's full transcript.",
         how_to: "Conversations > tap the worker reference card in the parent thread, or open the worker-labeled thread from the thread list",
         status: CapabilityStatus::Beta,
-        privacy: DERIVED_TO_BACKEND,
+        privacy: DERIVED_TO_LLM_PROVIDER,
     },
     Capability {
         id: "intelligence.slack_memory_ingest",
@@ -384,17 +384,7 @@ const CAPABILITIES: &[Capability] = &[
         description: "Trigger a manual data sync for a skill integration.",
         how_to: "Skills > Skill card > Sync",
         status: CapabilityStatus::Beta,
-        privacy: DERIVED_TO_BACKEND,
-    },
-    Capability {
-        id: "skills.run_apify_actors",
-        name: "Run Apify Actors",
-        domain: "skills",
-        category: CapabilityCategory::Skills,
-        description: "Launch Apify scrapers and automation actors, then inspect run status and collected results.",
-        how_to: "Conversations > Ask the assistant to run an Apify actor",
-        status: CapabilityStatus::Beta,
-        privacy: None,
+        privacy: DERIVED_TO_LLM_PROVIDER,
     },
     Capability {
         id: "skills.toggle_enabled",
@@ -417,15 +407,6 @@ const CAPABILITIES: &[Capability] = &[
         privacy: None,
     },
     // ── Composio direct mode (BYO API key) ──────────────────────────
-    //
-    // Composio shipped with two integration paths:
-    //   1. Backend-proxied (default) — calls through api.tinyhumans.ai;
-    //      backend owns the Composio API key, billing, allowlist, and
-    //      HMAC-verified trigger fan-out via socket.io.
-    //   2. Direct (BYO key) — core calls backend.composio.dev directly
-    //      with the user's own key. Sovereign / offline-friendly, but
-    //      tool execution only — real-time trigger webhooks are NOT
-    //      routed in direct mode (they still require the backend).
     Capability {
         id: "composio.direct_mode",
         name: "Composio Direct Mode (BYO API Key)",
@@ -433,25 +414,11 @@ const CAPABILITIES: &[Capability] = &[
         category: CapabilityCategory::Skills,
         description:
             "Route Composio tool calls directly to backend.composio.dev with your own API key, \
-             bypassing the OpenHuman backend proxy. Tool execution only — trigger webhooks still \
-             require backend mode.",
-        how_to: "Settings > Skills > Composio > Direct mode",
+             with local trigger webhooks available from Settings when an ngrok domain and \
+             Composio webhook secret are configured.",
+        how_to: "Settings > Skills > Composio",
         status: CapabilityStatus::Beta,
         privacy: COMPOSIO_DIRECT_CREDENTIALS,
-    },
-    Capability {
-        id: "composio.direct_mode_triggers_gap",
-        name: "Composio Triggers (Direct Mode — Limited)",
-        domain: "skills",
-        category: CapabilityCategory::Skills,
-        description:
-            "Composio real-time trigger webhooks (Gmail new-message, Slack new-message, …) \
-             currently arrive over wss://api.tinyhumans.ai/socket.io and require backend mode. \
-             Direct-mode users get synchronous tool execution but not async trigger push in \
-             this release.",
-        how_to: "Switch to Backend mode to receive triggers, or wait for the direct trigger sink follow-up",
-        status: CapabilityStatus::ComingSoon,
-        privacy: None,
     },
     Capability {
         id: "skills.connect_google",
@@ -627,76 +594,6 @@ const CAPABILITIES: &[Capability] = &[
         how_to: "Configured by the core `runtime_python` module; future UI surfaces can expose install state and overrides.",
         status: CapabilityStatus::Beta,
         privacy: MODEL_DOWNLOAD,
-    },
-    Capability {
-        id: "team.create",
-        name: "Create Teams",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "Create a team and start collaborating with shared billing and members.",
-        how_to: "Settings > Team",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "team.join_via_invite_code",
-        name: "Join Teams via Invite Code",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "Join an existing team using an invite code.",
-        how_to: "Invites > Redeem an Invite Code",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "team.switch_active_team",
-        name: "Switch Active Team",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "Switch which team is currently active in the app.",
-        how_to: "Settings > Team",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "team.leave",
-        name: "Leave Teams",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "Leave a team that you no longer want to participate in.",
-        how_to: "Settings > Team",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "team.manage_members",
-        name: "Manage Team Members",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "Review members and change team roles when you have permission.",
-        how_to: "Settings > Team > Manage team > Members",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "team.generate_invite_codes",
-        name: "Generate Invite Codes",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "Create invite codes to bring new members into a team.",
-        how_to: "Settings > Team > Manage team > Invites",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "team.track_invite_usage",
-        name: "Track Invite Usage",
-        domain: "team",
-        category: CapabilityCategory::Team,
-        description: "View invite usage counts, limits, and revoke team invites.",
-        how_to: "Settings > Team > Manage team > Invites",
-        status: CapabilityStatus::Stable,
-        privacy: None,
     },
     Capability {
         id: "auth.login_oauth",
@@ -889,47 +786,7 @@ const CAPABILITIES: &[Capability] = &[
             No personal data, messages, or credentials are ever included.",
         how_to: "Settings > Privacy (direct route)",
         status: CapabilityStatus::Stable,
-        privacy: DIAGNOSTICS_TO_BACKEND,
-    },
-    Capability {
-        id: "settings.view_billing",
-        name: "View Billing",
-        domain: "settings",
-        category: CapabilityCategory::Settings,
-        description: "Open subscription, included usage, and pay-as-you-go billing views for your active team.",
-        how_to: "Settings > Billing & Usage",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "settings.manage_subscription_plan",
-        name: "Manage Subscription Plan",
-        domain: "settings",
-        category: CapabilityCategory::Settings,
-        description: "Upgrade plans or open the billing portal to manage subscription-backed usage tiers.",
-        how_to: "Settings > Billing & Usage",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "settings.manage_credits",
-        name: "Manage Credits",
-        domain: "settings",
-        category: CapabilityCategory::Settings,
-        description: "View pay-as-you-go credit balances, top up overage credits, and configure auto-recharge.",
-        how_to: "Settings > Billing & Usage",
-        status: CapabilityStatus::Stable,
-        privacy: None,
-    },
-    Capability {
-        id: "settings.add_payment_methods",
-        name: "Add Payment Methods",
-        domain: "settings",
-        category: CapabilityCategory::Settings,
-        description: "Add or manage saved payment methods for billing and auto-recharge.",
-        how_to: "Settings > Billing & Usage > Payment Methods",
-        status: CapabilityStatus::Stable,
-        privacy: None,
+        privacy: DIAGNOSTICS_TO_SENTRY,
     },
     Capability {
         id: "settings.developer_options",

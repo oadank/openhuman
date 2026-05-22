@@ -2,7 +2,6 @@ export type ComposerSendBlockReason =
   | 'empty_input'
   | 'missing_thread'
   | 'composer_blocked'
-  | 'usage_limit_reached'
   | 'socket_disconnected';
 
 export type SlashCommandDecision =
@@ -13,7 +12,6 @@ export interface ComposerSendDecisionArgs {
   rawText: string;
   selectedThreadId: string | null;
   composerInteractionBlocked: boolean;
-  isAtLimit: boolean;
   socketStatus: string;
 }
 
@@ -25,7 +23,7 @@ export interface ComposerSendDecision {
 
 export interface ComposerBlockedSendFeedback {
   showLimitModal: boolean;
-  error: { code: 'usage_limit_reached' | 'socket_disconnected'; message: string };
+  error: { code: 'socket_disconnected'; message: string };
 }
 
 export interface ComposerKeyDownEventLike {
@@ -62,10 +60,6 @@ export const evaluateComposerSend = (args: ComposerSendDecisionArgs): ComposerSe
     return { shouldSend: false, trimmedText, blockReason: 'composer_blocked' };
   }
 
-  if (args.isAtLimit) {
-    return { shouldSend: false, trimmedText, blockReason: 'usage_limit_reached' };
-  }
-
   if (args.socketStatus !== 'connected') {
     return { shouldSend: false, trimmedText, blockReason: 'socket_disconnected' };
   }
@@ -92,16 +86,6 @@ export const shouldSendComposerKeyDown = (
 export const getComposerBlockedSendFeedback = (
   blockReason: ComposerSendBlockReason | undefined
 ): ComposerBlockedSendFeedback | null => {
-  if (blockReason === 'usage_limit_reached') {
-    return {
-      showLimitModal: true,
-      error: {
-        code: 'usage_limit_reached',
-        message: 'Usage limit reached. Upgrade or wait for reset.',
-      },
-    };
-  }
-
   if (blockReason === 'socket_disconnected') {
     return {
       showLimitModal: false,

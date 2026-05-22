@@ -3,7 +3,7 @@
 //! Crypto Agent is a narrow-scope, write-capable specialist. The body
 //! is the archetype's read/simulate/confirm/execute contract, followed
 //! by the standard tool + workspace blocks so the model sees the
-//! `wallet_*` / `stock_*` schemas the runtime injected. Identity,
+//! `wallet_*` schemas the runtime injected. Identity,
 //! skills catalogue and global memory context are omitted — they would
 //! dilute the financial-safety voice the archetype establishes.
 

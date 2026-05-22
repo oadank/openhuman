@@ -4,9 +4,6 @@ const APP_ENV = (import.meta.env.VITE_OPENHUMAN_APP_ENV as string | undefined)
   ?.trim()
   .toLowerCase();
 
-const DEFAULT_BACKEND_URL =
-  APP_ENV === 'staging' ? 'https://staging-api.tinyhumans.ai' : 'https://api.tinyhumans.ai';
-
 /**
  * Build-time fallback for the Core JSON-RPC endpoint URL.
  *
@@ -98,21 +95,6 @@ export const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID as strin
 
 /** Sentry DSN for error reporting. Leave blank to disable. */
 export const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-
-/**
- * Build-time fallback for the backend API base URL.
- *
- * **Not runtime-authoritative in Tauri.** In the desktop app, `getBackendUrl()`
- * (in `services/backendUrl.ts`) asks the core sidecar for the live API URL via
- * `openhuman.config_resolve_api_url`. If that call fails or returns an empty
- * URL, `getBackendUrl()` **throws** — it does not fall back to this constant.
- * This constant is only used in web/non-Tauri mode (where the sidecar is not
- * present).
- *
- * Override at build time via `VITE_BACKEND_URL`.
- */
-export const BACKEND_URL =
-  (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim() || DEFAULT_BACKEND_URL;
 
 /** Telegram bot username used for managed DM linking when backend does not return a launch URL. */
 export const TELEGRAM_BOT_USERNAME =

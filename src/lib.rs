@@ -5,7 +5,6 @@
 //! - Core system services (CLI, configuration, monitoring).
 //! - Domain-specific logic for the OpenHuman agent runtime.
 
-pub mod api;
 pub mod core;
 pub mod openhuman;
 pub mod rpc;

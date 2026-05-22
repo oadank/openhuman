@@ -91,11 +91,7 @@ fn default_config_dir() -> Result<PathBuf> {
 }
 
 fn default_root_dir_name() -> &'static str {
-    if crate::api::config::is_staging_app_env(crate::api::config::app_env_from_env().as_deref()) {
-        ".openhuman-staging"
-    } else {
-        ".openhuman"
-    }
+    ".openhuman"
 }
 
 /// Returns the root openhuman directory (`~/.openhuman`), independent of any
@@ -557,43 +553,6 @@ async fn parse_toml_off_worker(contents: String) -> Result<Config, String> {
 /// soon as someone picked a non-OpenHuman provider. We now keep them in
 /// separate fields; on load, detect that legacy shape (any `api_url` whose
 /// path looks like a chat-completions endpoint) and move it.
-fn migrate_legacy_inference_url(config: &mut Config) {
-    if config.inference_url.is_some() {
-        return;
-    }
-    let Some(url) = config.api_url.as_deref() else {
-        return;
-    };
-    let trimmed = url.trim().trim_end_matches('/');
-    if !trimmed.ends_with("/chat/completions") {
-        return;
-    }
-    // OpenHuman's hosted backend exposes inference at `/openai/v1/chat/completions`;
-    // when api_url points there, the derived inference URL is already correct —
-    // just clear api_url so it falls back to the default base. For everything
-    // else, move the legacy value into inference_url.
-    let is_openhuman_backend = trimmed.starts_with("https://api.tinyhumans.ai/")
-        || trimmed.starts_with("https://staging-api.tinyhumans.ai/");
-    let moved = if is_openhuman_backend {
-        None
-    } else {
-        Some(trimmed.to_string())
-    };
-    // Log the URL with userinfo (basic-auth creds) and query string stripped
-    // so credentials embedded by callers — `https://user:token@host/v1/...`
-    // or `?api_key=...` — don't end up in log files / Sentry breadcrumbs.
-    let logged = match moved.as_deref() {
-        None => "<derived>".to_string(),
-        Some(u) => redact_url_for_log(u),
-    };
-    tracing::info!(
-        "[config][migrate] splitting legacy api_url -> inference_url (api_url cleared, inference_url={})",
-        logged
-    );
-    config.inference_url = moved;
-    config.api_url = None;
-}
-
 /// Strip userinfo (basic-auth) and query string from a URL string for log
 /// emission. Falls back to a coarse `<host>/...` form when parsing fails so
 /// we never leak the raw input. Public only so the migration's unit test
@@ -629,30 +588,11 @@ pub(super) fn redact_url_for_log(raw: &str) -> String {
 /// untouched. Routing fields that already contain a `:` are assumed to be
 /// in the new `<slug>:<model>` form.
 fn migrate_cloud_provider_slugs(config: &mut Config) {
-    use super::cloud_providers::{migrate_legacy_fields, migrate_openhuman_jwt_entries};
+    use super::cloud_providers::migrate_legacy_fields;
 
     // Step 1: migrate every cloud_providers entry in-place.
     for entry in &mut config.cloud_providers {
         migrate_legacy_fields(entry);
-    }
-
-    // Step 1b: closedhuman-fork-only — convert any OpenhumanJwt entries
-    // (left over from the upstream backend-shipped era) to Bearer with
-    // empty key. The factory's openhuman-backend path is gone, so these
-    // rows would otherwise surface the misleading SESSION_EXPIRED error
-    // for every chat call. The user has to re-add a real API key under
-    // Settings → AI for each converted slug; that's a one-time chore the
-    // fork can't avoid because the upstream entries never had a real
-    // key on disk (the backend session JWT did the auth).
-    let converted = migrate_openhuman_jwt_entries(&mut config.cloud_providers);
-    if !converted.is_empty() {
-        log::info!(
-            "[config][cloud_providers] migrated {} OpenhumanJwt entr{} to Bearer (empty key): [{}]. \
-             Re-add API keys under Settings → AI.",
-            converted.len(),
-            if converted.len() == 1 { "y" } else { "ies" },
-            converted.join(", ")
-        );
     }
 
     // Step 2: rewrite per-workload routing strings from legacy bare grammar.
@@ -856,7 +796,6 @@ impl Config {
             config.config_path = config_path.clone();
             config.workspace_dir = workspace_dir;
             migrate_legacy_autocomplete_disabled_apps(&mut config);
-            migrate_legacy_inference_url(&mut config);
             migrate_cloud_provider_slugs(&mut config);
             config.apply_env_overrides_from(env);
 

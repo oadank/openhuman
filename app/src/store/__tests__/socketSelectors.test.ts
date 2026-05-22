@@ -25,9 +25,6 @@ function makeCoreState(token: string | null): CoreState {
       localState: { encryptionKey: null, onboardingTasks: null },
       runtime: { screenIntelligence: null, localAi: null, autocomplete: null, service: null },
     },
-    teams: [],
-    teamMembersById: {},
-    teamInvitesById: {},
   };
 }
 

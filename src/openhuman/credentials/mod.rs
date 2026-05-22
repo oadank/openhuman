@@ -1,17 +1,12 @@
-//! Credential management for app session and provider auth profiles.
+//! Credential management for provider auth profiles.
 
-pub mod bus;
 pub mod cli;
 mod core;
 pub mod ops;
 pub mod profiles;
 pub mod responses;
 mod schemas;
-pub mod session_support;
 
-pub use crate::api::rest::{
-    user_id_from_auth_me_payload, user_id_from_profile_payload, BackendOAuthClient,
-};
 pub use core::*;
 pub use ops as rpc;
 pub use ops::*;

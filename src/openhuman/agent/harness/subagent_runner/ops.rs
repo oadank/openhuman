@@ -550,17 +550,9 @@ async fn run_typed_mode(
                 }
             };
 
-            // Resolve the live client kind for the catalogue refresh
-            // path. Backend mode keeps the existing
-            // `fetch_toolkit_actions` round-trip. Direct mode mirrors
-            // the `ComposioListToolsTool` short-circuit — the backend
-            // toolkit allowlist isn't authoritative for a personal
-            // Composio tenant, so we fall back to the parent's cached
-            // catalogue rather than emit a misleading "couldn't fetch"
-            // surface (#1710 Wave 2).
             use crate::openhuman::composio::client::{create_composio_client, ComposioClientKind};
-            let client_kind = match create_composio_client(arc_config.as_ref()) {
-                Ok(k) => Some(k),
+            let direct_client = match create_composio_client(arc_config.as_ref()) {
+                Ok(ComposioClientKind::Direct(direct)) => Some(direct),
                 Err(e) => {
                     tracing::warn!(
                         agent_id = %definition.id,
@@ -584,85 +576,41 @@ async fn run_typed_mode(
                 .iter()
                 .find(|ci| ci.connected && ci.toolkit.eq_ignore_ascii_case(tk))
             {
-                // Refresh the toolkit's action catalogue at spawn time
-                // by calling `composio_list_tools` for the bound toolkit.
-                // The cached list on `parent.connected_integrations`
-                // comes from the session-start bulk fetch, which can
-                // return zero actions for some toolkits even when the
-                // per-toolkit endpoint returns a full catalogue. Falling
-                // back to the cached list preserves the previous
-                // behaviour on network failure.
-                let fresh_actions = match &client_kind {
-                    Some(ComposioClientKind::Backend(client)) => {
-                        match crate::openhuman::composio::fetch_toolkit_actions(client, tk).await {
-                            Ok(actions) if !actions.is_empty() => actions,
-                            Ok(_) => {
-                                tracing::debug!(
-                                    agent_id = %definition.id,
-                                    toolkit = %tk,
-                                    "[subagent_runner:typed] fresh list_tools returned empty; falling back to cached catalogue"
-                                );
-                                cached_integration.tools.clone()
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    agent_id = %definition.id,
-                                    toolkit = %tk,
-                                    error = %e,
-                                    "[subagent_runner:typed] fresh list_tools failed; falling back to cached catalogue"
-                                );
-                                cached_integration.tools.clone()
-                            }
+                let fresh_actions = match &direct_client {
+                    Some(direct) => match crate::openhuman::composio::fetch_direct_toolkit_actions(
+                        direct, tk,
+                    )
+                    .await
+                    {
+                        Ok(actions) if !actions.is_empty() => {
+                            tracing::info!(
+                                agent_id = %definition.id,
+                                toolkit = %tk,
+                                action_count = actions.len(),
+                                cached_actions = cached_integration.tools.len(),
+                                "[composio-direct] subagent_runner:typed: refreshed direct catalogue"
+                            );
+                            actions
                         }
-                    }
-                    Some(ComposioClientKind::Direct(direct)) => {
-                        // Direct mode CAN refresh — Composio v3
-                        // `/tools?toolkit_slugs=<tk>` returns the live
-                        // per-toolkit catalogue from the user's personal
-                        // tenant. Use it so a mid-session
-                        // `composio_authorize` is visible to the
-                        // sub-agent without an app restart: the bulk
-                        // fetch at session start can populate a
-                        // zero-action entry for a toolkit whose OAuth
-                        // hadn't reached ACTIVE yet, and the cached
-                        // empty list otherwise sticks for the lifetime
-                        // of the process. The previous behaviour (just
-                        // returning the cached vec) surfaced as
-                        // "Gmail isn't connected" to the user even when
-                        // the user had just connected Gmail.
-                        match crate::openhuman::composio::fetch_direct_toolkit_actions(direct, tk)
-                            .await
-                        {
-                            Ok(actions) if !actions.is_empty() => {
-                                tracing::info!(
-                                    agent_id = %definition.id,
-                                    toolkit = %tk,
-                                    action_count = actions.len(),
-                                    cached_actions = cached_integration.tools.len(),
-                                    "[composio-direct] subagent_runner:typed: refreshed direct catalogue"
-                                );
-                                actions
-                            }
-                            Ok(_) => {
-                                tracing::info!(
-                                    agent_id = %definition.id,
-                                    toolkit = %tk,
-                                    cached_actions = cached_integration.tools.len(),
-                                    "[composio-direct] subagent_runner:typed: direct refresh returned empty; falling back to cached catalogue"
-                                );
-                                cached_integration.tools.clone()
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    agent_id = %definition.id,
-                                    toolkit = %tk,
-                                    error = %e,
-                                    "[composio-direct] subagent_runner:typed: direct refresh failed; falling back to cached catalogue"
-                                );
-                                cached_integration.tools.clone()
-                            }
+                        Ok(_) => {
+                            tracing::info!(
+                                agent_id = %definition.id,
+                                toolkit = %tk,
+                                cached_actions = cached_integration.tools.len(),
+                                "[composio-direct] subagent_runner:typed: direct refresh returned empty; falling back to cached catalogue"
+                            );
+                            cached_integration.tools.clone()
                         }
-                    }
+                        Err(e) => {
+                            tracing::warn!(
+                                agent_id = %definition.id,
+                                toolkit = %tk,
+                                error = %e,
+                                "[composio-direct] subagent_runner:typed: direct refresh failed; falling back to cached catalogue"
+                            );
+                            cached_integration.tools.clone()
+                        }
+                    },
                     None => {
                         tracing::debug!(
                             agent_id = %definition.id,

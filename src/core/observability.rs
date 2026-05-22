@@ -154,7 +154,7 @@ pub fn expected_error_kind(message: &str) -> Option<ExpectedErrorKind> {
 /// - `"SESSION_EXPIRED: backend session not active — sign in to resume LLM work"`
 ///   — the `scheduler_gate::is_signed_out` sentinel from
 ///   `providers::openhuman_backend::resolve_bearer`.
-/// - `"no backend session token; run auth_store_session first"` and
+/// - `"no provider credentials configured"` and
 ///   `"session JWT required"` — local pre-flight guards that fire when the
 ///   stored profile is empty (`#1465`-ish onboarding spam) or has been
 ///   cleared by a previous 401 cycle. Both shapes are OpenHuman-specific.
@@ -182,7 +182,7 @@ pub fn is_session_expired_message(msg: &str) -> bool {
 /// can't reach the server at all.
 ///
 /// These are user-environment problems — VPN drop, captive portal, ISP-level
-/// block (OPENHUMAN-TAURI-32: user in RU couldn't reach `api.tinyhumans.ai`),
+/// block (OPENHUMAN-TAURI-32: user in RU couldn't reach `api.example.test`),
 /// firewall — that no amount of retry / fallback on our side can resolve.
 /// Sentry has no signal to act on (no status, no trace, no payload), so each
 /// occurrence is pure noise. Classify them as expected so the report site
@@ -252,7 +252,7 @@ fn is_transient_upstream_http_message(lower: &str) -> bool {
 /// [`crate::openhuman::integrations::client::IntegrationClient::post`] / `get`
 /// and [`crate::openhuman::composio::client::ComposioClient`] is:
 /// `"Backend returned <status> <reason> for <METHOD> <url>: <detail>"` — e.g.
-/// `"Backend returned 400 Bad Request for POST https://api.tinyhumans.ai/agent-integrations/composio/authorize: Composio authorization failed: 400 …"`
+/// `"Backend returned 400 Bad Request for POST https://api.example.test/integrations/composio/authorize: Composio authorization failed: 400 …"`
 /// (OPENHUMAN-TAURI-BC: user submitted SharePoint authorize without filling in
 /// the required Tenant Name field). The backend correctly returned a 4xx; the
 /// UI already surfaces the structured error to the user via toast — Sentry has
@@ -1026,7 +1026,7 @@ mod tests {
         assert_eq!(
             expected_error_kind(
                 "run_chat_task failed client_id=abc thread_id=t1 request_id=r1 \
-                 error=error sending request for url (https://api.tinyhumans.ai/openai/v1/chat/completions)"
+                 error=error sending request for url (https://api.example.test/openai/v1/chat/completions)"
             ),
             Some(ExpectedErrorKind::NetworkUnreachable)
         );
@@ -1117,7 +1117,7 @@ mod tests {
         // drops the URL anchor (e.g. a chain-flatten helper that strips
         // it for "PII safety"), which would silently re-open the leak.
         let chain = "error sending request for url \
-                     (https://api.tinyhumans.ai/agent-integrations/composio/execute) → \
+                     (https://api.example.test/integrations/composio/execute) → \
                      client error (SendRequest) → connection error → \
                      Operation timed out (os error 60)";
         assert_eq!(
@@ -1277,7 +1277,7 @@ mod tests {
         // Sentry; the dedicated bucket gives operators a finer-grained
         // `kind="provider_user_state"` info-log facet for triage.
         let bc = "Backend returned 400 Bad Request for POST \
-                  https://api.tinyhumans.ai/agent-integrations/composio/authorize: \
+                  https://api.example.test/integrations/composio/authorize: \
                   Composio authorization failed: 400 \
                   {\"error\":{\"message\":\"Missing required fields: Tenant Name\",\
                   \"slug\":\"ConnectedAccount_MissingRequiredFields\",\"status\":400}}";
@@ -1299,7 +1299,7 @@ mod tests {
             "Backend returned 422 Unprocessable Entity for POST https://api.example.com/x: validation failed",
             "Backend returned 451 Unavailable for Legal Reasons for GET https://api.example.com/x: blocked",
             // Lowercased context wrapping is irrelevant — substring match is case-insensitive.
-            "[observability] integrations.post failed: Backend returned 400 Bad Request for POST https://api.tinyhumans.ai/x: detail",
+            "[observability] integrations.post failed: Backend returned 400 Bad Request for POST https://api.example.test/x: detail",
         ] {
             assert_eq!(
                 expected_error_kind(raw),
@@ -1363,7 +1363,7 @@ mod tests {
         assert_eq!(
             expected_error_kind(
                 "Backend returned 500 Internal Server Error for POST \
-                 https://api.tinyhumans.ai/agent-integrations/composio/triggers: \
+                 https://api.example.test/integrations/composio/triggers: \
                  Trigger type GITHUB_PUSH_EVENT not found"
             ),
             Some(ExpectedErrorKind::ProviderUserState)
@@ -1374,7 +1374,7 @@ mod tests {
         assert_eq!(
             expected_error_kind(
                 "rpc.invoke_method failed: Backend returned 500 Internal Server Error \
-                 for POST /agent-integrations/composio/triggers: \
+                 for POST /integrations/composio/triggers: \
                  Trigger type SLACK_NEW_MESSAGE not found"
             ),
             Some(ExpectedErrorKind::ProviderUserState)
@@ -1396,7 +1396,7 @@ mod tests {
         // specific) rather than the generic BackendUserError bucket — the
         // ordering in `expected_error_kind` enforces that.
         let msg = "Backend returned 400 Bad Request for POST \
-                   https://api.tinyhumans.ai/agent-integrations/composio/execute: \
+                   https://api.example.test/integrations/composio/execute: \
                    Toolkit \"get\" is not enabled";
         assert_eq!(
             expected_error_kind(msg),
@@ -1407,7 +1407,7 @@ mod tests {
         assert_eq!(
             expected_error_kind(
                 "tool.invoke failed: Backend returned 400 Bad Request for POST \
-                 /agent-integrations/composio/execute: Toolkit \"linear\" is not enabled \
+                 /integrations/composio/execute: Toolkit \"linear\" is not enabled \
                  for this account"
             ),
             Some(ExpectedErrorKind::ProviderUserState)
@@ -1422,7 +1422,7 @@ mod tests {
         assert_eq!(
             expected_error_kind(
                 "Backend returned 500 Internal Server Error for POST \
-                 https://api.tinyhumans.ai/agent-integrations/composio/authorize: \
+                 https://api.example.test/integrations/composio/authorize: \
                  400 {\"error\":{\"message\":\"Missing required fields: Your Subdomain\"}}"
             ),
             Some(ExpectedErrorKind::ProviderUserState)
@@ -1472,7 +1472,7 @@ mod tests {
         assert_eq!(
             expected_error_kind(
                 "Backend returned 500 Internal Server Error for POST \
-                 /agent-integrations/composio/triggers: random panic in handler"
+                 /integrations/composio/triggers: random panic in handler"
             ),
             None
         );
@@ -1527,7 +1527,7 @@ mod tests {
         // kind than intended (and miss the `kind="provider_user_state"`
         // tag in info logs).
         let msg = "Backend returned 400 Bad Request for POST \
-                   /agent-integrations/composio/execute: \
+                   /integrations/composio/execute: \
                    Toolkit \"github\" is not enabled";
         assert_eq!(
             expected_error_kind(msg),
@@ -1631,9 +1631,9 @@ mod tests {
         // Local pre-flight guards — OpenHuman-specific phrasing, safe to
         // match regardless of caller wrapping.
         for raw in [
-            "no backend session token; run auth_store_session first",
+            "no provider credentials configured",
             "session JWT required",
-            "composio unavailable: no backend session token. Sign in first (auth_store_session).",
+            "composio unavailable: no direct api key configured.",
         ] {
             assert_eq!(
                 expected_error_kind(raw),
@@ -1887,7 +1887,7 @@ mod tests {
         for phrase in TRANSIENT_TRANSPORT_PHRASES {
             let event = event_with_tags_and_message(
                 &[("domain", "integrations"), ("failure", "transport")],
-                &format!("GET /agent-integrations/tools failed: {phrase}"),
+                &format!("GET /integrations/tools failed: {phrase}"),
             );
             assert!(
                 is_transient_integrations_failure(&event),
@@ -1927,7 +1927,7 @@ mod tests {
 
         let non_matching_transport = event_with_tags_and_message(
             &[("domain", "integrations"), ("failure", "transport")],
-            "GET /agent-integrations/tools failed: invalid certificate",
+            "GET /integrations/tools failed: invalid certificate",
         );
         assert!(
             !is_transient_integrations_failure(&non_matching_transport),

@@ -63,7 +63,6 @@ pub mod screen_intelligence;
 pub mod security;
 pub mod service;
 pub mod skills;
-pub mod socket;
 pub mod subconscious;
 #[cfg(feature = "e2e-test-support")]
 pub mod test_support;

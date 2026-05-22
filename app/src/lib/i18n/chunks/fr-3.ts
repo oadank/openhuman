@@ -320,7 +320,6 @@ const fr3: TranslationMap = {
   'app.openhumanLink.skipForNow': "Passer pour l'instant",
   'app.openhumanLink.telegramUnavailable': 'Telegram indisponible',
   'app.openhumanLink.title.accounts': 'Connecte tes apps',
-  'app.openhumanLink.title.billing': 'Facturation & crédits',
   'app.openhumanLink.title.discord': 'Rejoins la communauté',
   'app.openhumanLink.title.messaging': 'Connecter un canal de chat',
   'app.openhumanLink.title.notifications': 'Autoriser les notifications',

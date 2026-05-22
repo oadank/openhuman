@@ -144,7 +144,6 @@ fn runtime_context(workspace_dir: PathBuf) -> ChannelRuntimeContext {
         conversation_histories: Arc::new(Mutex::new(HashMap::new())),
         provider_cache: ProviderCacheMap::default(),
         route_overrides: RouteSelectionMap::default(),
-        api_url: None,
         inference_url: None,
         reliability: Arc::new(crate::openhuman::config::ReliabilityConfig::default()),
         provider_runtime_options:

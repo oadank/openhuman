@@ -447,8 +447,8 @@ async fn try_invoke_registered_rpc_routes_security_policy_info() {
 fn rpc_method_name_handles_multi_underscore_function() {
     // Functions often contain underscores — the RPC method name must
     // preserve them verbatim, separated from the namespace with `_`.
-    let s = schema("team", "change_member_role", vec![]);
-    assert_eq!(rpc_method_name(&s), "openhuman.team_change_member_role");
+    let s = schema("memory", "doc_put_chunk", vec![]);
+    assert_eq!(rpc_method_name(&s), "openhuman.memory_doc_put_chunk");
 }
 
 #[test]

@@ -470,7 +470,6 @@ fn handle_inference_update_model_settings(params: Map<String, Value>) -> Control
     Box::pin(async move {
         let update = deserialize_params::<InferenceUpdateModelSettingsParams>(params)?;
         let patch = config_rpc::ModelSettingsPatch {
-            api_url: update.api_url,
             inference_url: update.inference_url,
             api_key: update.api_key,
             default_model: update.default_model,
@@ -513,11 +512,10 @@ fn handle_inference_update_model_settings(params: Map<String, Value>) -> Control
                             {
                                 "bearer" => AuthStyle::Bearer,
                                 "anthropic" => AuthStyle::Anthropic,
-                                "openhuman_jwt" | "openhumanjwt" => AuthStyle::OpenhumanJwt,
                                 "none" => AuthStyle::None,
                                 other => {
                                     return Err(format!(
-                                        "unknown auth_style '{}'; valid: bearer, anthropic, openhuman_jwt, none",
+                                        "unknown auth_style '{}'; valid: bearer, anthropic, none",
                                         other
                                     ))
                                 }

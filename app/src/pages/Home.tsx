@@ -2,14 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import ConnectionIndicator from '../components/ConnectionIndicator';
-import {
-  DiscordBanner,
-  EarlyBirdyBanner,
-  PromotionalCreditsBanner,
-  UsageLimitBanner,
-} from '../components/home/HomeBanners';
-import { dismissBanner, shouldShowBanner } from '../components/upsell/upsellDismissState';
-import { useUsageState } from '../hooks/useUsageState';
+import { DiscordBanner } from '../components/home/HomeBanners';
 import { useUser } from '../hooks/useUser';
 import { useT } from '../lib/i18n/I18nContext';
 import { restartCoreProcess } from '../services/coreProcessControl';
@@ -45,23 +38,8 @@ const Home = () => {
   const { t } = useT();
   const { user } = useUser();
   const navigate = useNavigate();
-  const { isRateLimited, shouldShowBudgetCompletedMessage } = useUsageState();
   const _userName = resolveHomeUserName(user);
   const userName = _userName.split(' ')[0]; // Get first name only
-  const promoCredits = user?.usage?.promotionBalanceUsd ?? 0;
-  const isFreeTier =
-    user?.subscription?.plan === 'FREE' || !user?.subscription?.hasActiveSubscription;
-  const showPromoBanner = isFreeTier && promoCredits > 0.01;
-
-  // Early birdy banner: once dismissed it stays gone (cooldown longer than any realistic session).
-  const [showEarlyBirdy, setShowEarlyBirdy] = useState(() =>
-    shouldShowBanner('home-earlybirdy', Number.MAX_SAFE_INTEGER)
-  );
-
-  const handleDismissEarlyBirdy = () => {
-    dismissBanner('home-earlybirdy');
-    setShowEarlyBirdy(false);
-  };
 
   const welcomeVariants = useMemo(
     () => [`Welcome, ${userName} 👋`, `Let's cook, ${userName} 🧑‍🍳.`, `Time to Zone In 🧘🏻`],
@@ -148,28 +126,6 @@ const Home = () => {
   return (
     <div className="min-h-full flex flex-col items-center justify-center p-4">
       <div className="max-w-md w-full">
-        {isRateLimited && (
-          <UsageLimitBanner
-            tone="warning"
-            icon="⏳"
-            title="You’ve Hit Your Limits"
-            message="You’ve reached your short-term usage cap. Buy top-up credits to keep going right away."
-            ctaLabel="Buy top-up credits"
-          />
-        )}
-
-        {!isRateLimited && shouldShowBudgetCompletedMessage && (
-          <UsageLimitBanner
-            tone="danger"
-            icon="⚠️"
-            title="You’ve Exhausted Your Usage"
-            message="You’re out of included usage for now. Start a subscription to unlock more ongoing capacity."
-            ctaLabel="Get a subscription"
-          />
-        )}
-
-        {showPromoBanner && <PromotionalCreditsBanner promoCredits={promoCredits} />}
-
         {/* Theme toggle — sun/moon icon above the main card */}
         <div className="flex justify-end mb-2">
           <button
@@ -268,8 +224,6 @@ const Home = () => {
           </button>
         </div>
 
-        {showEarlyBirdy && <EarlyBirdyBanner onDismiss={handleDismissEarlyBirdy} />}
-
         <DiscordBanner />
 
         {/* Next steps — compact directory of where to go next */}
@@ -283,50 +237,6 @@ const Home = () => {
                 <div className="text-sm font-medium text-stone-900">Connect your services</div>
                 <div className="text-xs text-stone-500">
                   Give your assistant access to Gmail, Calendar, and more.
-                </div>
-              </div>
-              <svg
-                className="w-4 h-4 text-stone-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-            <button
-              onClick={() => navigate('/rewards')}
-              className="w-full flex items-center justify-between py-2.5 text-left hover:bg-stone-50 rounded-md px-2 -mx-2 transition-colors">
-              <div>
-                <div className="text-sm font-medium text-stone-900">Earn rewards</div>
-                <div className="text-xs text-stone-500">
-                  Unlock credits by using OpenHuman and completing milestones.
-                </div>
-              </div>
-              <svg
-                className="w-4 h-4 text-stone-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 5l7 7-7 7"
-                />
-              </svg>
-            </button>
-            <button
-              onClick={() => navigate('/invites')}
-              className="w-full flex items-center justify-between py-2.5 text-left hover:bg-stone-50 rounded-md px-2 -mx-2 transition-colors">
-              <div>
-                <div className="text-sm font-medium text-stone-900">Invite a friend</div>
-                <div className="text-xs text-stone-500">
-                  Share an invite — both of you get credits.
                 </div>
               </div>
               <svg

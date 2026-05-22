@@ -7,12 +7,11 @@
 //! ## Provider-string grammar
 //!
 //! ```text
-//! "openhuman"        → OpenHumanBackendProvider; model = config.default_model
 //! "ollama:<model>"   → local Ollama at config.local_ai.base_url
 //! "<slug>:<model>"   → cloud_providers entry keyed by slug;
 //!                      builds OpenAiCompatibleProvider (Bearer) or Anthropic
 //!                      flavour depending on auth_style.
-//! ""  / missing      → falls back to "openhuman"
+//! ""  / missing      → falls back to primary_cloud / first configured provider.
 //! ```
 //!
 //! Unknown slugs and missing-creds configurations produce actionable errors.
@@ -23,12 +22,8 @@ use crate::openhuman::credentials::AuthService;
 use crate::openhuman::inference::provider::compatible::{
     AuthStyle as CompatAuthStyle, OpenAiCompatibleProvider,
 };
-use crate::openhuman::inference::provider::openhuman_backend::OpenHumanBackendProvider;
 use crate::openhuman::inference::provider::traits::Provider;
-use crate::openhuman::inference::provider::ProviderRuntimeOptions;
 
-/// Sentinel meaning "use the OpenHuman backend session JWT".
-pub const PROVIDER_OPENHUMAN: &str = "openhuman";
 /// Prefix for Ollama-local providers: `"ollama:<model>"`.
 pub const OLLAMA_PROVIDER_PREFIX: &str = "ollama:";
 
@@ -42,7 +37,6 @@ pub fn auth_key_for_slug(slug: &str) -> String {
 
 /// Return the configured provider string for a named workload role.
 ///
-/// Returns `"openhuman"` when the workload has no explicit override.
 pub fn provider_for_role(role: &str, config: &Config) -> String {
     let opt = match role {
         "reasoning" => config.reasoning_provider.as_deref(),
@@ -63,32 +57,22 @@ pub fn provider_for_role(role: &str, config: &Config) -> String {
     let s = opt.unwrap_or("").trim();
     if s.is_empty() || s == "cloud" {
         // When no explicit per-workload provider is set, resolve
-        // primary_cloud. If it points to a non-openhuman entry, use
-        // it. If primary_cloud is missing or stale, fall back to the
-        // first non-openhuman entry in `cloud_providers` (typically
-        // the migration-seeded "openai" entry). The OpenHuman backend
-        // sentinel is no longer a valid fallback in this fork — when
-        // nothing matches we return it only so callers see the
-        // factory's typed "no cloud provider configured" error
-        // instead of silently degrading.
+        // primary_cloud. If it is missing or stale, fall back to the
+        // first configured provider (typically the migration-seeded
+        // "openai" entry).
         let primary_slug = config.primary_cloud.as_deref().and_then(|pid| {
             config
                 .cloud_providers
                 .iter()
-                .find(|e| e.id == pid && e.slug != PROVIDER_OPENHUMAN)
+                .find(|e| e.id == pid)
                 .map(|e| e.slug.clone())
         });
-        let resolved = primary_slug.or_else(|| {
-            config
-                .cloud_providers
-                .iter()
-                .find(|e| e.slug != PROVIDER_OPENHUMAN)
-                .map(|e| e.slug.clone())
-        });
+        let resolved =
+            primary_slug.or_else(|| config.cloud_providers.first().map(|e| e.slug.clone()));
         if let Some(slug) = resolved {
             format!("{slug}:")
         } else {
-            PROVIDER_OPENHUMAN.to_string()
+            String::new()
         }
     } else {
         s.to_string()
@@ -124,13 +108,8 @@ pub fn create_chat_provider_from_string(
         p
     );
 
-    // Empty / legacy "cloud" sentinel → OpenHuman backend.
     if p.is_empty() || p == "cloud" {
-        return make_openhuman_backend(config);
-    }
-
-    if p == PROVIDER_OPENHUMAN {
-        return make_openhuman_backend(config);
+        anyhow::bail!("No LLM provider configured. Add a provider under Settings → AI.");
     }
 
     // (Removed) Session gate — the OpenHuman backend session is gone
@@ -184,7 +163,7 @@ pub fn create_chat_provider_from_string(
     // than an opaque parse failure.
     anyhow::bail!(
         "[chat-factory] unrecognised provider string '{}' for role '{}'. \
-         Valid forms: openhuman, ollama:<model>, <slug>:<model>. \
+         Valid forms: ollama:<model>, <slug>:<model>. \
          Configured slugs: [{}]",
         p,
         role,
@@ -198,64 +177,6 @@ pub fn create_chat_provider_from_string(
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-
-/// Build the OpenHuman backend provider (session-JWT auth).
-///
-/// In the local-OAuth fork there is no OpenHuman backend, so this
-/// hard-errors with a pointer at Settings → AI. The function is kept
-/// (rather than deleted) so existing call sites that resolve to the
-/// `"openhuman"` sentinel still type-check; their callers were never
-/// supposed to reach this in the local-only configuration, and the
-/// error surface is the user-facing way to find out their config
-/// drifted (e.g. `auth_style = "OpenhumanJwt"` left over from an
-/// older `cloud_providers` row).
-fn make_openhuman_backend(config: &Config) -> anyhow::Result<(Box<dyn Provider>, String)> {
-    let _ = config;
-    anyhow::bail!(
-        "[chat-factory] OpenHuman backend provider is not available in this build — \
-         configure a cloud provider (e.g. OpenAI) under Settings → AI, or set \
-         `primary_cloud` / `*_provider` to a slug present in `cloud_providers`."
-    );
-    #[allow(unreachable_code)]
-    let model = config
-        .default_model
-        .clone()
-        .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| "reasoning-v1".to_string());
-    // Critical: pass the *config's* workspace directory through so the
-    // provider's `AuthService` reads `auth-profiles.json` from the
-    // same dir login wrote to. Without this, `ProviderRuntimeOptions::default()`
-    // leaves `openhuman_dir = None`, the provider falls back to
-    // `~/.openhuman`, and reads an unrelated (or empty)
-    // profile store — surfacing as "No backend session: store a JWT
-    // via auth (app-session)" even though login just succeeded in the
-    // user's actual workspace (e.g. test workspaces under OPENHUMAN_WORKSPACE).
-    let options = ProviderRuntimeOptions {
-        openhuman_dir: config.config_path.parent().map(std::path::PathBuf::from),
-        secrets_encrypt: config.secrets.encrypt,
-        ..ProviderRuntimeOptions::default()
-    };
-    log::debug!(
-        "[providers][chat-factory] building openhuman backend provider model={} state_dir={:?} secrets_encrypt={}",
-        model,
-        options.openhuman_dir,
-        options.secrets_encrypt
-    );
-    // Translate `hint:<tier>` model strings into the OpenHuman backend's
-    // canonical tier names.
-    let model = match model.strip_prefix("hint:") {
-        Some("reasoning") => crate::openhuman::config::MODEL_REASONING_V1.to_string(),
-        Some("chat") => crate::openhuman::config::MODEL_REASONING_QUICK_V1.to_string(),
-        Some("agentic") => crate::openhuman::config::MODEL_AGENTIC_V1.to_string(),
-        Some("coding") => crate::openhuman::config::MODEL_CODING_V1.to_string(),
-        _ => model,
-    };
-    let p = Box::new(OpenHumanBackendProvider::new(
-        config.api_url.as_deref(),
-        &options,
-    ));
-    Ok((p, model))
-}
 
 /// Build an Ollama local provider.
 fn make_ollama_provider(
@@ -336,15 +257,6 @@ fn make_cloud_provider_by_slug(
                 unsupported,
             )?;
             Ok((p, effective_model))
-        }
-        AuthStyle::OpenhumanJwt => {
-            // Route to the OpenHuman backend — ignore the entry's endpoint
-            // and model; use the backend provider with the configured default.
-            log::debug!(
-                "[providers][chat-factory] slug='{}' has auth_style=OpenhumanJwt → routing to openhuman backend",
-                slug
-            );
-            make_openhuman_backend(config)
         }
         AuthStyle::None => {
             let p = make_openai_compatible_provider_with_config(

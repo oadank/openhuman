@@ -24,32 +24,9 @@ import type { Thread } from '../../types/thread';
 
 // ── Hoisted mock state ─────────────────────────────────────────────────────
 
-const { mockGetThreads, mockGetThreadMessages, mockUseUsageState } = vi.hoisted(() => ({
+const { mockGetThreads, mockGetThreadMessages } = vi.hoisted(() => ({
   mockGetThreads: vi.fn().mockResolvedValue({ threads: [], count: 0 }),
   mockGetThreadMessages: vi.fn().mockResolvedValue({ messages: [], count: 0 }),
-  mockUseUsageState: vi.fn(() => ({
-    teamUsage: null as null | {
-      cycleBudgetUsd: number;
-      remainingUsd: number;
-      fiveHourCapUsd: number;
-      cycleLimit5hr: number;
-      bypassCycleLimit: boolean;
-      fiveHourResetsAt: string | null;
-      cycleEndsAt: string | null;
-    },
-    currentPlan: null,
-    currentTier: 'FREE' as 'FREE' | 'BASIC' | 'PRO',
-    isFreeTier: true,
-    usagePct10h: 0,
-    usagePct7d: 0,
-    isNearLimit: false,
-    isAtLimit: false,
-    isRateLimited: false,
-    isBudgetExhausted: false,
-    shouldShowBudgetCompletedMessage: false,
-    isLoading: false,
-    refresh: vi.fn(),
-  })),
 }));
 
 // ── Module mocks ───────────────────────────────────────────────────────────
@@ -117,8 +94,6 @@ vi.mock('../../services/api/agentProfilesApi', () => ({
     delete: vi.fn().mockResolvedValue({ activeProfileId: 'default', profiles: [] }),
   },
 }));
-
-vi.mock('../../hooks/useUsageState', () => ({ useUsageState: mockUseUsageState }));
 
 vi.mock('../../store/socketSelectors', () => ({
   selectSocketStatus: (state: { socket?: { byUser?: Record<string, { status: string }> } }) =>
@@ -231,26 +206,11 @@ function socketState(status: 'connected' | 'disconnected') {
 }
 
 async function renderSelectedConversation(
-  options: { isAtLimit?: boolean; socketStatus?: 'connected' | 'disconnected' } = {}
+  options: { socketStatus?: 'connected' | 'disconnected' } = {}
 ) {
   const thread = makeThread({ id: 'send-thread', title: 'Send Thread' });
   mockGetThreads.mockResolvedValue({ threads: [thread], count: 1 });
   mockGetThreadMessages.mockResolvedValue({ messages: [], count: 0 });
-  mockUseUsageState.mockReturnValue({
-    teamUsage: null,
-    currentPlan: null,
-    currentTier: 'FREE' as const,
-    isFreeTier: true,
-    usagePct10h: options.isAtLimit ? 1 : 0,
-    usagePct7d: options.isAtLimit ? 1 : 0,
-    isNearLimit: Boolean(options.isAtLimit),
-    isAtLimit: Boolean(options.isAtLimit),
-    isRateLimited: Boolean(options.isAtLimit),
-    isBudgetExhausted: false,
-    shouldShowBudgetCompletedMessage: false,
-    isLoading: false,
-    refresh: vi.fn(),
-  });
 
   let renderedStore: ReturnType<typeof buildStore> | undefined;
   await act(async () => {
@@ -285,21 +245,6 @@ describe('Conversations — smoke render (#1123 welcome-lock removal)', () => {
     // Reset the mock to defaults for each test
     mockGetThreads.mockResolvedValue({ threads: [], count: 0 });
     mockGetThreadMessages.mockResolvedValue({ messages: [], count: 0 });
-    mockUseUsageState.mockReturnValue({
-      teamUsage: null,
-      currentPlan: null,
-      currentTier: 'FREE' as const,
-      isFreeTier: true,
-      usagePct10h: 0,
-      usagePct7d: 0,
-      isNearLimit: false,
-      isAtLimit: false,
-      isRateLimited: false,
-      isBudgetExhausted: false,
-      shouldShowBudgetCompletedMessage: false,
-      isLoading: false,
-      refresh: vi.fn(),
-    });
   });
 
   // Covers line 906: const effectiveShowSidebar = showSidebar;
@@ -364,71 +309,6 @@ describe('Conversations — smoke render (#1123 welcome-lock removal)', () => {
       // The error branch renders "Failed to load messages" static text
       expect(screen.getByText('Failed to load messages')).toBeInTheDocument();
     });
-  });
-
-  // Covers lines 1455-1483: quota pill loading state
-  it('renders "Loading…" quota pill when isLoadingBudget=true', async () => {
-    mockUseUsageState.mockReturnValue({
-      teamUsage: null,
-      currentPlan: null,
-      currentTier: 'FREE' as const,
-      isFreeTier: true,
-      usagePct10h: 0,
-      usagePct7d: 0,
-      isNearLimit: false,
-      isAtLimit: false,
-      isRateLimited: false,
-      isBudgetExhausted: false,
-      shouldShowBudgetCompletedMessage: false,
-      isLoading: true,
-      refresh: vi.fn(),
-    });
-
-    await act(async () => {
-      await renderConversations({ thread: emptyThreadState });
-    });
-
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
-  });
-
-  // Covers lines 1417-1439: budget banner + lines 1455-1516: LimitPill + tooltip
-  it('renders budget-limit banner and limit pills when teamUsage is present', async () => {
-    // cycleBudgetUsd: 0 → renders "Your included budget is complete" branch
-    const teamUsage = {
-      cycleBudgetUsd: 0,
-      remainingUsd: 0,
-      fiveHourCapUsd: 5,
-      cycleLimit5hr: 5,
-      bypassCycleLimit: false,
-      fiveHourResetsAt: null,
-      cycleEndsAt: null,
-    };
-
-    mockUseUsageState.mockReturnValue({
-      teamUsage,
-      currentPlan: null,
-      currentTier: 'PRO' as const,
-      isFreeTier: false,
-      usagePct10h: 1.0,
-      usagePct7d: 1.0,
-      isNearLimit: true,
-      isAtLimit: true,
-      isRateLimited: false,
-      isBudgetExhausted: true,
-      shouldShowBudgetCompletedMessage: true,
-      isLoading: false,
-      refresh: vi.fn(),
-    });
-
-    await act(async () => {
-      await renderConversations({ thread: emptyThreadState });
-    });
-
-    // Budget-exceeded banner (lines 1417-1439) — cycleBudgetUsd=0 gives "included budget" message
-    expect(screen.getByText(/Your included budget is complete/i)).toBeInTheDocument();
-
-    // LimitPill components (lines 1459-1480) — their label text
-    expect(screen.getByText('7d')).toBeInTheDocument();
   });
 
   // Covers line 247: if (cancelled) return — the non-cancelled path through loadThreads callback
@@ -514,159 +394,6 @@ describe('Conversations — smoke render (#1123 welcome-lock removal)', () => {
     expect(screen.getByText(/Are you sure you want to delete/i)).toBeInTheDocument();
   });
 
-  // Covers lines 1399, 1409-1410: isNearLimit UpsellBanner render + onCtaClick
-  it('renders near-limit UpsellBanner and clicking Upgrade calls openUrl', async () => {
-    const { openUrl } = await import('../../utils/openUrl');
-
-    mockUseUsageState.mockReturnValue({
-      teamUsage: null,
-      currentPlan: null,
-      currentTier: 'FREE' as const,
-      isFreeTier: true,
-      usagePct10h: 0.85,
-      usagePct7d: 0.85,
-      isNearLimit: true,
-      isAtLimit: false,
-      isRateLimited: false,
-      isBudgetExhausted: false,
-      shouldShowBudgetCompletedMessage: false,
-      isLoading: false,
-      refresh: vi.fn(),
-    });
-
-    await act(async () => {
-      await renderConversations({ thread: emptyThreadState });
-    });
-
-    // UpsellBanner renders with "Approaching usage limit" (line 1399 branch)
-    expect(screen.getByText('Approaching usage limit')).toBeInTheDocument();
-
-    // Click the "Upgrade" button — covers line 1409-1410 (onCtaClick callback)
-    const upgradeBtn = screen.getByText('Upgrade');
-    await act(async () => {
-      fireEvent.click(upgradeBtn);
-    });
-
-    expect(openUrl).toHaveBeenCalled();
-  });
-
-  // Covers line 1413: onDismiss callback inside UpsellBanner
-  it('dismissing the near-limit UpsellBanner writes to localStorage (onDismiss executes)', async () => {
-    mockUseUsageState.mockReturnValue({
-      teamUsage: null,
-      currentPlan: null,
-      currentTier: 'FREE' as const,
-      isFreeTier: true,
-      usagePct10h: 0.9,
-      usagePct7d: 0.9,
-      isNearLimit: true,
-      isAtLimit: false,
-      isRateLimited: false,
-      isBudgetExhausted: false,
-      shouldShowBudgetCompletedMessage: false,
-      isLoading: false,
-      refresh: vi.fn(),
-    });
-
-    await act(async () => {
-      await renderConversations({ thread: emptyThreadState });
-    });
-
-    // UpsellBanner renders
-    expect(screen.getByText('Approaching usage limit')).toBeInTheDocument();
-
-    // Click dismiss button (aria-label="Dismiss") — covers line 1413 (onDismiss callback)
-    const dismissBtn = screen.getByRole('button', { name: 'Dismiss' });
-    await act(async () => {
-      fireEvent.click(dismissBtn);
-    });
-
-    // dismissBanner writes to localStorage with the banner key — confirms line 1413 executed
-    expect(localStorage.getItem('openhuman:upsell:conversations-warning')).not.toBeNull();
-  });
-
-  // Covers line 1443: onClick inside "Top Up" button in budget-exceeded banner
-  it('clicking "Top Up" in the budget banner calls openUrl', async () => {
-    const { openUrl } = await import('../../utils/openUrl');
-
-    const teamUsage = {
-      cycleBudgetUsd: 10,
-      remainingUsd: 0,
-      fiveHourCapUsd: 5,
-      cycleLimit5hr: 5,
-      bypassCycleLimit: false,
-      fiveHourResetsAt: null,
-      cycleEndsAt: null,
-    };
-
-    mockUseUsageState.mockReturnValue({
-      teamUsage,
-      currentPlan: null,
-      currentTier: 'PRO' as const,
-      isFreeTier: false,
-      usagePct10h: 1.0,
-      usagePct7d: 1.0,
-      isNearLimit: true,
-      isAtLimit: true,
-      isRateLimited: false,
-      isBudgetExhausted: true,
-      shouldShowBudgetCompletedMessage: true,
-      isLoading: false,
-      refresh: vi.fn(),
-    });
-
-    await act(async () => {
-      await renderConversations({ thread: emptyThreadState });
-    });
-
-    // Budget banner renders — cycleBudgetUsd: 10 > 0 → "You've hit your weekly limit"
-    expect(screen.getByText(/You've hit your weekly limit/i)).toBeInTheDocument();
-
-    // Click "Top Up" button — covers line 1442-1443 (onClick callback)
-    const topUpBtn = screen.getByText('Top Up');
-    await act(async () => {
-      fireEvent.click(topUpBtn);
-    });
-
-    expect(openUrl).toHaveBeenCalled();
-  });
-
-  // Covers line 1437: rate-limit message branch (isRateLimited=true, shouldShowBudgetCompletedMessage=false)
-  it('renders rate-limit message in budget banner when isRateLimited=true', async () => {
-    const teamUsage = {
-      cycleBudgetUsd: 10,
-      remainingUsd: 5,
-      fiveHourCapUsd: 5,
-      cycleLimit5hr: 5,
-      bypassCycleLimit: false,
-      fiveHourResetsAt: null,
-      cycleEndsAt: null,
-    };
-
-    mockUseUsageState.mockReturnValue({
-      teamUsage,
-      currentPlan: null,
-      currentTier: 'PRO' as const,
-      isFreeTier: false,
-      usagePct10h: 1.0,
-      usagePct7d: 0.5,
-      isNearLimit: true,
-      isAtLimit: false,
-      isRateLimited: true,
-      isBudgetExhausted: false,
-      shouldShowBudgetCompletedMessage: false,
-      isLoading: false,
-      refresh: vi.fn(),
-    });
-
-    await act(async () => {
-      await renderConversations({ thread: emptyThreadState });
-    });
-
-    // isRateLimited=true, shouldShowBudgetCompletedMessage=false → rate-limit branch (line 1437)
-    expect(screen.getByText(/10-hour rate limit reached/i)).toBeInTheDocument();
-  });
-
   it('handles /new from the composer without a selected thread or sending chat text', async () => {
     mockGetThreads.mockReturnValue(new Promise(() => {}));
 
@@ -684,18 +411,6 @@ describe('Conversations — smoke render (#1123 welcome-lock removal)', () => {
     });
     expect(chatSend).not.toHaveBeenCalled();
     expect(textarea).toHaveValue('');
-  });
-
-  it('shows the usage-limit modal instead of sending when the account is at limit', async () => {
-    const { textarea } = await renderSelectedConversation({ isAtLimit: true });
-
-    await submitComposerText(textarea, 'hello at limit');
-
-    await waitFor(() => {
-      expect(screen.getByText('Usage Limit Reached')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/Usage limit reached/i)).toBeInTheDocument();
-    expect(chatSend).not.toHaveBeenCalled();
   });
 
   it('persists a local user message and sends through chat service for valid input', async () => {

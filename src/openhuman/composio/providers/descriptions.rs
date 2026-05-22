@@ -29,7 +29,7 @@ pub fn toolkit_description(slug: &str) -> &'static str {
         "spotify" => "Control playback, search music, and manage playlists on Spotify",
         "telegram" => "Send and receive messages via Telegram",
         "whatsapp" => "Send and receive messages via WhatsApp",
-        "twilio" => "Send SMS, make calls, and manage communications via Twilio",
+        "twilio" => "Send SMS, make calls, and manage phone communications",
         "shopify" => "Manage products, orders, and customers in Shopify",
         "stripe" => "Manage payments, subscriptions, and customers in Stripe",
         "hubspot" => "Manage contacts, deals, and marketing in HubSpot",

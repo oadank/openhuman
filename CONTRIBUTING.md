@@ -152,7 +152,7 @@ cp app/.env.example app/.env.local
 
 Minimal configuration guidance:
 
-- **Web UI / frontend work**: the defaults in `app/.env.local` are usually enough for local startup. Set `VITE_BACKEND_URL` only if you need a non-production backend in web mode.
+- **Web UI / frontend work**: the defaults in `app/.env.local` are usually enough for local startup. The app talks to the embedded local core; there is no hosted product backend URL to configure.
 - **Desktop work**: leave `OPENHUMAN_CORE_TOKEN` blank for local child-mode development unless you are intentionally wiring an external core. The shell manages the embedded core token flow.
 - **Core RPC / standalone core work**: `OPENHUMAN_CORE_PORT=7788` and `OPENHUMAN_CORE_RPC_URL=http://127.0.0.1:7788/rpc` are already documented in the root template and are the normal local defaults.
 - **Skills development**: use `SKILLS_REGISTRY_URL` or `SKILLS_LOCAL_DIR` from the root template when pointing the app at a local built skills checkout.

@@ -318,7 +318,6 @@ const pt3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'Pular por enquanto',
   'app.openhumanLink.telegramUnavailable': 'Telegram indisponível',
   'app.openhumanLink.title.accounts': 'Conecte seus apps',
-  'app.openhumanLink.title.billing': 'Cobrança e créditos',
   'app.openhumanLink.title.discord': 'Entrar na comunidade',
   'app.openhumanLink.title.messaging': 'Conectar um canal de chat',
   'app.openhumanLink.title.notifications': 'Permitir notificações',

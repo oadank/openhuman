@@ -1,25 +1,14 @@
-//! Reply-speech synthesis — proxies the hosted backend's
-//! `/openai/v1/audio/speech` endpoint (ElevenLabs under the hood) so the
-//! desktop UI does not have to talk to it directly. Returns base64-encoded
-//! audio + an Oculus-15 viseme alignment timeline the mascot uses for
-//! lip-sync.
+//! Reply-speech synthesis response types shared by local TTS providers.
 //!
 //! Lives in the voice domain because the response is consumed by the
 //! mascot's lipsync pipeline (`useHumanMascot` → `findActiveFrame` →
 //! `oculusVisemeToShape`).
 
-use log::debug;
-use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
-use crate::api::config::effective_backend_api_url;
-use crate::api::jwt::get_session_token;
-use crate::api::BackendOAuthClient;
 use crate::openhuman::config::Config;
 use crate::rpc::RpcOutcome;
-
-const LOG_PREFIX: &str = "[voice_reply]";
 
 /// One frame on the viseme timeline. `viseme` is an Oculus / Microsoft
 /// 15-set code (`sil, PP, FF, TH, DD, kk, CH, SS, nn, RR, aa, E, I, O, U`).
@@ -64,98 +53,19 @@ pub struct ReplySpeechOptions {
     pub voice_settings: Option<Value>,
 }
 
-/// Synthesize the agent's reply through the hosted backend.
-///
-/// Uses [`BackendOAuthClient`] for the same reason `referral` does: the
-/// desktop WebView's `fetch` to the backend can fail with an opaque
-/// "Load failed" (CORS/TLS quirks), and routing through the core gives us
-/// a consistent auth + retry surface.
+/// Backend cloud TTS was removed from the local-only fork. Keep this
+/// function only so older call sites fail loudly instead of silently
+/// returning empty audio.
 pub async fn synthesize_reply(
-    config: &Config,
+    _config: &Config,
     text: &str,
-    opts: &ReplySpeechOptions,
+    _opts: &ReplySpeechOptions,
 ) -> Result<RpcOutcome<ReplySpeechResult>, String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err("text is required".to_string());
     }
-
-    let token = get_session_token(config)
-        .map_err(|e| e.to_string())?
-        .and_then(|t| {
-            let s = t.trim().to_string();
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        })
-        .ok_or_else(|| "no backend session token; sign in first".to_string())?;
-
-    let api_url = effective_backend_api_url(&config.api_url);
-    let client = BackendOAuthClient::new(&api_url).map_err(|e| e.to_string())?;
-
-    let mut body = serde_json::Map::new();
-    body.insert("text".to_string(), json!(trimmed));
-    body.insert("with_visemes".to_string(), json!(true));
-    if let Some(v) = opts
-        .voice_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        body.insert("voice_id".to_string(), json!(v));
-    }
-    if let Some(v) = opts
-        .model_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        body.insert("model_id".to_string(), json!(v));
-    }
-    if let Some(v) = opts
-        .output_format
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        body.insert("output_format".to_string(), json!(v));
-    }
-    if let Some(settings) = opts.voice_settings.as_ref() {
-        if !settings.is_null() {
-            body.insert("voice_settings".to_string(), settings.clone());
-        }
-    }
-
-    debug!(
-        "{LOG_PREFIX} synthesize chars={} voice={}",
-        trimmed.len(),
-        opts.voice_id.as_deref().unwrap_or("default")
-    );
-
-    let raw = client
-        .authed_json(
-            &token,
-            Method::POST,
-            "/openai/v1/audio/speech",
-            Some(Value::Object(body)),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let result = normalize_response(&raw);
-    debug!(
-        "{LOG_PREFIX} synthesized audio_bytes={} visemes={} alignment={}",
-        result.audio_base64.len(),
-        result.visemes.len(),
-        result.alignment.as_ref().map_or(0, Vec::len)
-    );
-
-    Ok(RpcOutcome::single_log(
-        result,
-        "voice reply synthesized via POST /openai/v1/audio/speech",
-    ))
+    Err("cloud TTS is unavailable in this build; use provider `kokoro`, `piper`, or `system`".to_string())
 }
 
 /// Translate the backend's tolerant response shape into the UI contract.

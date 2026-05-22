@@ -319,7 +319,6 @@ const es3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'Omitir por ahora',
   'app.openhumanLink.telegramUnavailable': 'Telegram no disponible',
   'app.openhumanLink.title.accounts': 'Conecta tus apps',
-  'app.openhumanLink.title.billing': 'Facturación y créditos',
   'app.openhumanLink.title.discord': 'Únete a la comunidad',
   'app.openhumanLink.title.messaging': 'Conecta un canal de chat',
   'app.openhumanLink.title.notifications': 'Permitir notificaciones',

@@ -317,7 +317,6 @@ const id3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'Lewati untuk sekarang',
   'app.openhumanLink.telegramUnavailable': 'Telegram tidak tersedia',
   'app.openhumanLink.title.accounts': 'Hubungkan aplikasi Anda',
-  'app.openhumanLink.title.billing': 'Tagihan & kredit',
   'app.openhumanLink.title.discord': 'Bergabung ke komunitas',
   'app.openhumanLink.title.messaging': 'Hubungkan kanal chat',
   'app.openhumanLink.title.notifications': 'Izinkan notifikasi',

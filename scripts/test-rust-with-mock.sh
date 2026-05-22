@@ -40,8 +40,6 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-export BACKEND_URL="$MOCK_API_URL"
-export VITE_BACKEND_URL="$MOCK_API_URL"
 # The agent harness test surface includes very large async futures in debug
 # builds (notably the typed sub-agent runner). The default Rust test-thread
 # stack can be too small on Apple Silicon debug runs, leading to a stack
@@ -49,7 +47,7 @@ export VITE_BACKEND_URL="$MOCK_API_URL"
 # unless the caller already pinned one explicitly.
 export RUST_MIN_STACK="${RUST_MIN_STACK:-16777216}"
 
-echo "Running Rust tests with BACKEND_URL=$BACKEND_URL and RUST_MIN_STACK=$RUST_MIN_STACK"
+echo "Running Rust tests with RUST_MIN_STACK=$RUST_MIN_STACK"
 cd "$REPO_ROOT"
 source "$HOME/.cargo/env" 2>/dev/null || true
 cargo test --manifest-path Cargo.toml --workspace "$@"

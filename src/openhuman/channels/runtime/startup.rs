@@ -177,7 +177,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
     };
     let provider: Arc<dyn Provider> = Arc::from(provider::create_intelligent_routing_provider(
         config.inference_url.as_deref(),
-        config.api_url.as_deref(),
+        None,
         config.api_key.as_deref(),
         &config,
         &provider_runtime_options,
@@ -306,7 +306,7 @@ pub async fn start_channels(config: Config) -> Result<()> {
         bootstrap_max_chars,
         None,
     );
-    // Filter out Skill-category tools (e.g. Composio, Apify) from the
+    // Filter out Skill-category tools (e.g. Composio) from the
     // main agent prompt — those are only available to the integrations_agent
     // subagent via category_filter = "skill".
     let non_skill_tools: Vec<&Box<dyn crate::openhuman::tools::Tool>> = tools_registry
@@ -630,7 +630,6 @@ pub async fn start_channels(config: Config) -> Result<()> {
         conversation_histories: Arc::new(Mutex::new(HashMap::new())),
         provider_cache: Arc::new(Mutex::new(provider_cache_seed)),
         route_overrides: Arc::new(Mutex::new(HashMap::new())),
-        api_url: config.api_url.clone(),
         inference_url: config.inference_url.clone(),
         reliability: Arc::new(config.reliability.clone()),
         provider_runtime_options,

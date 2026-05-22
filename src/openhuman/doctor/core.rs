@@ -175,38 +175,16 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagnosticItem>) {
         ));
     }
 
-    // Backend API URL
-    if let Some(url) = config
-        .api_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        items.push(DiagnosticItem::ok(cat, format!("api_url: {url}")));
+    if config.cloud_providers.is_empty() {
+        items.push(DiagnosticItem::warn(
+            cat,
+            "no cloud providers configured; add a provider under Settings -> AI",
+        ));
     } else {
-        let resolved = crate::api::config::effective_api_url(&config.api_url);
         items.push(DiagnosticItem::ok(
             cat,
-            format!("api_url: (unset) resolved to {resolved}"),
+            format!("cloud providers configured: {}", config.cloud_providers.len()),
         ));
-    }
-
-    match crate::api::jwt::get_session_token(config) {
-        Ok(Some(token)) if !token.trim().is_empty() => {
-            items.push(DiagnosticItem::ok(cat, "signed in with app session JWT"));
-        }
-        Ok(_) => {
-            items.push(DiagnosticItem::warn(
-                cat,
-                "no app session JWT — not signed in",
-            ));
-        }
-        Err(err) => {
-            items.push(DiagnosticItem::error(
-                cat,
-                format!("failed to read app session JWT: {err}"),
-            ));
-        }
     }
 
     // Model configured

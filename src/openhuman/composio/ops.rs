@@ -22,10 +22,9 @@ type OpResult<T> = std::result::Result<T, String>;
 use std::sync::Arc;
 
 use super::client::{
-    build_composio_client, create_composio_client, direct_authorize, direct_create_trigger,
-    direct_delete_connection, direct_disable_trigger, direct_enable_trigger,
-    direct_list_active_triggers, direct_list_available_triggers, direct_list_connections,
-    direct_list_tools, ComposioClient, ComposioClientKind,
+    create_composio_client, direct_authorize, direct_create_trigger, direct_delete_connection,
+    direct_disable_trigger, direct_enable_trigger, direct_list_active_triggers,
+    direct_list_available_triggers, direct_list_connections, direct_list_tools, ComposioClientKind,
 };
 use super::providers::{
     capability_matrix, get_provider, ProviderContext, ProviderUserProfile, SyncOutcome, SyncReason,
@@ -38,34 +37,6 @@ use super::types::{
     ComposioToolsResponse, ComposioTriggerHistoryResult,
 };
 use super::webhook_receiver;
-
-/// Resolve a backend-mode [`ComposioClient`] from the root config, or
-/// return an error string that the caller can surface over RPC.
-///
-/// Used by the **backend-only** Composio ops — `list_github_repos`
-/// and the trigger *write* family
-/// (`create_trigger` / `enable_trigger` / `disable_trigger`). These
-/// rely on backend bookkeeping that the direct-mode v3 surface cannot
-/// provide on its own: GitHub repo enumeration (per-connection),
-/// and HMAC-verified Composio webhook *delivery* into the user's app
-/// (without a backend webhook receiver, an enabled trigger fires
-/// events into the void). Trigger *reads*
-/// (`list_triggers` / `list_available_triggers`) are mode-aware via
-/// [`create_composio_client`] so direct-mode users can still browse
-/// their tenant's catalog.
-///
-/// Sync, auth (`composio_authorize`), execution (`composio_execute`),
-/// the `composio_list_*` family, `composio_get_user_profile`,
-/// `composio_refresh_all_identities`, and `composio_delete_connection`
-/// also go through [`create_composio_client`] so the
-/// `config.composio.mode` toggle is honoured per call (#1710).
-fn resolve_client(config: &Config) -> OpResult<ComposioClient> {
-    build_composio_client(config).ok_or_else(|| {
-        "composio unavailable: no backend session token. Sign in first \
-         (auth_store_session)."
-            .to_string()
-    })
-}
 
 /// Defense-in-depth Sentry funnel for composio op-layer errors.
 ///
@@ -168,43 +139,15 @@ pub async fn composio_list_toolkits(
     config: &Config,
 ) -> OpResult<RpcOutcome<ComposioToolkitsResponse>> {
     tracing::debug!("[composio] rpc list_toolkits");
-    // Route through the mode-aware factory so direct-mode users do NOT
-    // silently fall through to the backend tinyhumans tenant's allowlist.
-    // [composio-direct] In direct mode we don't expose a toolkit
-    // allowlist at all — the user's personal Composio account governs
-    // what's available. Returning an empty list signals "no curated
-    // allowlist" to the UI and prompt-builder, which matches the
-    // sovereign expectation: Direct mode users manage their toolkits
-    // through app.composio.dev directly.
-    let kind =
-        create_composio_client(config).map_err(|e| format!("[composio] list_toolkits: {e}"))?;
-    match kind {
-        ComposioClientKind::Backend(client) => {
-            tracing::debug!("[composio] list_toolkits: backend variant");
-            let resp = client.list_toolkits().await.map_err(|e| {
-                report_composio_op_error("list_toolkits", &e);
-                format!("[composio] list_toolkits failed: {e:#}")
-            })?;
-            let count = resp.toolkits.len();
-            Ok(RpcOutcome::new(
-                resp,
-                vec![format!("composio: {count} toolkit(s) enabled")],
-            ))
-        }
-        ComposioClientKind::Direct(_) => {
-            tracing::info!(
-                "[composio-direct] list_toolkits: direct mode active — no \
-                 server-side allowlist is enforced; returning empty toolkits \
-                 list. Users manage available toolkits via app.composio.dev."
-            );
-            Ok(RpcOutcome::new(
-                ComposioToolkitsResponse::default(),
-                vec!["composio: direct mode — no curated allowlist (toolkits \
-                     managed via app.composio.dev)"
-                    .to_string()],
-            ))
-        }
-    }
+    let _ = create_composio_client(config)
+        .map_err(|e| format!("[composio-direct] list_toolkits: {e}"))?;
+    tracing::info!(
+        "[composio-direct] list_toolkits: no server-side allowlist is enforced"
+    );
+    Ok(RpcOutcome::new(
+        ComposioToolkitsResponse::default(),
+        vec!["composio: direct mode - toolkits are managed via app.composio.dev".to_string()],
+    ))
 }
 
 pub async fn composio_list_capabilities(
@@ -227,68 +170,18 @@ pub async fn composio_list_connections(
     config: &Config,
 ) -> OpResult<RpcOutcome<ComposioConnectionsResponse>> {
     tracing::debug!("[composio] rpc list_connections");
-    // Route through the mode-aware factory so direct-mode users do NOT
-    // accidentally see the tinyhumans-tenant connections from the
-    // backend-proxied path. Mixing the two tenants is the bug behind the
-    // user-reported "I switched to Direct and my old integrations are
-    // still showing" symptom (#1710).
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] list_connections: {e}"))?;
-    let client = match kind {
-        ComposioClientKind::Backend(client) => {
-            tracing::debug!("[composio] list_connections: backend variant");
-            client
-        }
-        ComposioClientKind::Direct(direct) => {
-            // [composio-direct] Translate the user's Composio v3
-            // `/connected_accounts` view into the same
-            // `ComposioConnectionsResponse` shape the backend-proxied
-            // path emits. This is what unlocks end-to-end OAuth in
-            // direct mode: once the user completes the Composio-hosted
-            // flow, the UI's 5 s `composio_list_connections` poll picks
-            // up the new ACTIVE row from THEIR tenant (not the
-            // tinyhumans tenant) and flips the Settings badge to
-            // Connected (#1710).
-            tracing::info!(
-                "[composio-direct] list_connections: fetching v3 \
-                 /connected_accounts for the user's personal Composio tenant"
-            );
-            let resp = direct_list_connections(&direct)
-                .await
-                .map_err(|e| format!("[composio-direct] list_connections failed: {e:#}"))?;
-            let active = resp.connections.iter().filter(|c| c.is_active()).count();
-            let total = resp.connections.len();
-            // Reconcile the integrations cache against this fresh live
-            // snapshot from the user's own tenant — same defensive
-            // behaviour as the backend path, so the chat runtime's
-            // connected-toolkits view stays in sync within one poll
-            // interval.
-            sync_cache_with_connections(&resp.connections);
-            return Ok(RpcOutcome::new(
-                resp,
-                vec![format!(
-                    "composio: direct mode — {total} connection(s) listed ({active} active)"
-                )],
-            ));
-        }
-    };
-    let resp = client.list_connections().await.map_err(|e| {
-        report_composio_op_error("list_connections", &e);
-        format!("[composio] list_connections failed: {e:#}")
-    })?;
+    let resp = direct_list_connections(&direct)
+        .await
+        .map_err(|e| format!("[composio-direct] list_connections failed: {e:#}"))?;
     let active = resp.connections.iter().filter(|c| c.is_active()).count();
     let total = resp.connections.len();
-    // Reconcile the chat-runtime integrations cache against this fresh
-    // snapshot. The desktop UI polls this RPC every 5 s, so any OAuth
-    // completion that lands out-of-band from the event-bus invalidation
-    // path (common on Windows when `wait_for_connection_active`'s 60 s
-    // timeout fires before the user finishes the hosted flow) is still
-    // reflected in chat within one poll interval.
     sync_cache_with_connections(&resp.connections);
     Ok(RpcOutcome::new(
         resp,
         vec![format!(
-            "composio: {total} connection(s) listed ({active} active)"
+            "composio: direct mode - {total} connection(s) listed ({active} active)"
         )],
     ))
 }
@@ -299,42 +192,18 @@ pub async fn composio_authorize(
     extra_params: Option<serde_json::Value>,
 ) -> OpResult<RpcOutcome<ComposioAuthorizeResponse>> {
     tracing::debug!(toolkit = %toolkit, has_extra_params = extra_params.is_some(), "[composio] rpc authorize");
-    let kind = create_composio_client(config).map_err(|e| format!("[composio] authorize: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => {
-            tracing::debug!(toolkit = %toolkit, "[composio] authorize: backend variant");
-            client.authorize(toolkit, extra_params).await.map_err(|e| {
-                report_composio_op_error("authorize", &e);
-                format!("[composio] authorize failed: {e:#}")
-            })?
-        }
-        ComposioClientKind::Direct(direct) => {
-            tracing::info!(
-                toolkit = %toolkit,
-                "[composio-direct] authorize: routing to user's personal Composio tenant"
-            );
-            // [composio-direct] `extra_params` is the backend's escape
-            // hatch for toolkit-specific request fields (e.g. WhatsApp
-            // `waba_id`). The v3 direct endpoint takes no such surface
-            // — toolkit-specific data is configured upstream on
-            // app.composio.dev when the user creates the auth config.
-            // We log a warning instead of failing so the WhatsApp UX
-            // (which always passes a WABA id) still works for users
-            // who configured the auth config correctly on Composio's
-            // side.
-            if extra_params.is_some() {
-                tracing::warn!(
-                    toolkit = %toolkit,
-                    "[composio-direct] authorize: extra_params is set but direct mode does \
-                     not propagate it — configure toolkit-specific fields via \
-                     app.composio.dev for your auth config"
-                );
-            }
-            direct_authorize(&direct, toolkit, &config.composio.entity_id)
-                .await
-                .map_err(|e| format!("[composio-direct] authorize failed: {e:#}"))?
-        }
-    };
+    let ComposioClientKind::Direct(direct) =
+        create_composio_client(config).map_err(|e| format!("[composio] authorize: {e}"))?;
+    if extra_params.is_some() {
+        tracing::warn!(
+            toolkit = %toolkit,
+            "[composio-direct] authorize: extra_params is set but direct mode does \
+             not propagate it; configure toolkit-specific fields via app.composio.dev"
+        );
+    }
+    let resp = direct_authorize(&direct, toolkit, &config.composio.entity_id)
+        .await
+        .map_err(|e| format!("[composio-direct] authorize failed: {e:#}"))?;
 
     // Publish an event so any interested subscribers (e.g. UI refreshers,
     // analytics) can react to the new connection handoff.
@@ -357,40 +226,14 @@ pub async fn composio_delete_connection(
     connection_id: &str,
 ) -> OpResult<RpcOutcome<ComposioDeleteResponse>> {
     tracing::debug!(connection_id = %connection_id, "[composio] rpc delete_connection");
-    // Mode-aware: backend-proxied users keep going through the
-    // tinyhumans aggregator (`ComposioClient::delete_connection`),
-    // direct-mode users hit Composio v3 `/connected_accounts/{id}`
-    // against their own tenant via `direct_delete_connection`. The
-    // toolkit lookup is best-effort either way — failures degrade the
-    // post-delete bookkeeping (facets / PROFILE.md / `unknown` event
-    // toolkit) but never block the underlying delete call (matches the
-    // pre-#1710 behaviour).
     let toolkit = resolve_toolkit_for_connection_mode_aware(config, connection_id)
         .await
         .ok();
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] delete_connection: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => {
-            tracing::debug!(
-                connection_id,
-                "[composio] delete_connection: backend variant"
-            );
-            client.delete_connection(connection_id).await.map_err(|e| {
-                report_composio_op_error("delete_connection", &e);
-                format!("[composio] delete_connection failed: {e:#}")
-            })?
-        }
-        ComposioClientKind::Direct(direct) => {
-            tracing::info!(
-                connection_id,
-                "[composio-direct] delete_connection: routing to user's personal Composio tenant"
-            );
-            direct_delete_connection(&direct, connection_id)
-                .await
-                .map_err(|e| format!("[composio-direct] delete_connection failed: {e:#}"))?
-        }
-    };
+    let resp = direct_delete_connection(&direct, connection_id)
+        .await
+        .map_err(|e| format!("[composio-direct] delete_connection failed: {e:#}"))?;
     if let Some(toolkit) = toolkit.as_deref() {
         let deleted =
             super::providers::profile::delete_connected_identity_facets(toolkit, connection_id);
@@ -421,18 +264,18 @@ pub async fn composio_delete_connection(
     );
     // Bust the integrations cache so the next prompt reflects the removal.
     invalidate_connected_integrations_cache();
-    // Eagerly warm the cache from the backend so the very next
+    // Eagerly warm the cache from Composio so the very next
     // `cached_active_integrations` read (typically the orchestrator's
     // next-turn refresh, or the desktop UI's 5 s
     // `composio_list_connections` poll) sees the removal immediately
     // instead of waiting for a cache-miss round trip on the hot path.
     // Symmetric with the connect-side eager warm in
     // [`super::bus::ComposioConnectionCreatedSubscriber`]. Best-effort —
-    // on backend failure the UI poll repopulates within ~5 s as a
+    // on Composio failure the UI poll repopulates within ~5 s as a
     // safety net.
     //
     // Use the status-distinguishing fetcher so we log
-    // `Authoritative(empty)` and backend unavailability differently —
+    // `Authoritative(empty)` and Composio unavailability differently —
     // `fetch_connected_integrations` collapses both to `Vec::new()`
     // and would otherwise hide auth/backend failures from incident
     // triage.
@@ -447,7 +290,7 @@ pub async fn composio_delete_connection(
         FetchConnectedIntegrationsStatus::Unavailable => {
             tracing::warn!(
                 connection_id = %connection_id,
-                "[composio] eager cache warm after connection deletion skipped: backend unavailable"
+                "[composio] eager cache warm after connection deletion skipped: composio unavailable"
             );
         }
     }
@@ -464,99 +307,54 @@ pub async fn composio_list_tools(
     toolkits: Option<Vec<String>>,
 ) -> OpResult<RpcOutcome<ComposioToolsResponse>> {
     tracing::debug!(?toolkits, "[composio] rpc list_tools");
-    // Route through the mode-aware factory. In direct mode the backend
-    // tool catalogue (which is shaped by the tinyhumans-tenant
-    // allowlist + curated whitelist) does NOT apply — the user's
-    // personal Composio account governs discovery via app.composio.dev.
-    // Mirrors the empty-response short-circuit in `composio_list_toolkits`
-    // / `composio_list_connections` so the three "list_*" surfaces
-    // behave consistently and we don't accidentally leak backend-tenant
-    // data into direct mode (#1710).
-    let kind = create_composio_client(config).map_err(|e| format!("[composio] list_tools: {e}"))?;
-    match kind {
-        ComposioClientKind::Backend(client) => {
-            tracing::debug!("[composio] list_tools: backend variant");
-            let resp = client.list_tools(toolkits.as_deref()).await.map_err(|e| {
-                report_composio_op_error("list_tools", &e);
-                format!("[composio] list_tools failed: {e:#}")
+    let ComposioClientKind::Direct(direct) =
+        create_composio_client(config).map_err(|e| format!("[composio] list_tools: {e}"))?;
+    let scope: Vec<String> = match toolkits {
+        Some(list) if !list.is_empty() => list,
+        _ => {
+            let conns = direct_list_connections(&direct).await.map_err(|e| {
+                format!("[composio-direct] list_tools: prefetch connections failed: {e:#}")
             })?;
-            let count = resp.tools.len();
-            Ok(RpcOutcome::new(
-                resp,
-                vec![format!("composio: {count} tool(s) listed")],
-            ))
+            let mut v: Vec<String> = conns
+                .connections
+                .iter()
+                .filter(|c| c.is_active())
+                .map(|c| c.normalized_toolkit())
+                .filter(|t| !t.is_empty())
+                .collect();
+            v.sort();
+            v.dedup();
+            v
         }
-        ComposioClientKind::Direct(direct) => {
-            // [composio-direct] Discovery now hits Composio v3 `/tools`
-            // directly with the user's own API key. Tenant isolation is
-            // preserved (we never surface backend-tenant catalogue here),
-            // and the schemas Composio returns are tenant-agnostic so
-            // the LLM agent gets the same model-callable shape backend
-            // mode surfaces. Scope the request to the user's connected
-            // toolkits when no explicit filter was supplied — keeps the
-            // response bounded and skips schemas the agent can't call.
-            let scope: Vec<String> = match toolkits {
-                Some(list) if !list.is_empty() => list,
-                _ => {
-                    let conns = direct_list_connections(&direct).await.map_err(|e| {
-                        format!("[composio-direct] list_tools: prefetch connections failed: {e:#}")
-                    })?;
-                    let mut v: Vec<String> = conns
-                        .connections
-                        .iter()
-                        .filter(|c| c.is_active())
-                        .map(|c| c.normalized_toolkit())
-                        .filter(|t| !t.is_empty())
-                        .collect();
-                    v.sort();
-                    v.dedup();
-                    v
-                }
-            };
-            if scope.is_empty() {
-                tracing::info!(
-                    "[composio-direct] list_tools: no connected toolkits on this tenant — \
-                     returning empty tool list"
-                );
-                return Ok(RpcOutcome::new(
-                    ComposioToolsResponse::default(),
-                    vec!["composio: direct mode — 0 tool(s) listed (no connected \
-                         toolkits on this tenant)"
-                        .to_string()],
-                ));
-            }
-            tracing::debug!(
-                toolkits = scope.len(),
-                "[composio-direct] list_tools: fetching v3 tool schemas"
-            );
-            let mut resp = direct_list_tools(&direct, &scope)
-                .await
-                .map_err(|e| format!("[composio-direct] list_tools failed: {e:#}"))?;
-            // Apply the same curated-whitelist + user-scope filter the
-            // backend path runs — schemas may be tenant-agnostic but
-            // OpenHuman's curation policy isn't, and direct-mode users
-            // should benefit from the same safety net (e.g. dangerous
-            // destructive actions hidden by default).
-            let before = resp.tools.len();
-            filter_list_tools_response_for_direct(&mut resp).await;
-            let after = resp.tools.len();
-            tracing::debug!(
-                before,
-                after,
-                dropped = before - after,
-                "[composio-direct] list_tools: curated filter applied"
-            );
-            let count = resp.tools.len();
-            Ok(RpcOutcome::new(
-                resp,
-                vec![format!(
-                    "composio: direct mode — {count} tool(s) listed across \
-                     {} toolkit(s)",
-                    scope.len()
-                )],
-            ))
-        }
+    };
+    if scope.is_empty() {
+        return Ok(RpcOutcome::new(
+            ComposioToolsResponse::default(),
+            vec![
+                "composio: direct mode - 0 tool(s) listed (no connected toolkits)".to_string(),
+            ],
+        ));
     }
+    let mut resp = direct_list_tools(&direct, &scope)
+        .await
+        .map_err(|e| format!("[composio-direct] list_tools failed: {e:#}"))?;
+    let before = resp.tools.len();
+    filter_list_tools_response_for_direct(&mut resp).await;
+    let after = resp.tools.len();
+    tracing::debug!(
+        before,
+        after,
+        dropped = before - after,
+        "[composio-direct] list_tools: curated filter applied"
+    );
+    let count = resp.tools.len();
+    Ok(RpcOutcome::new(
+        resp,
+        vec![format!(
+            "composio: direct mode - {count} tool(s) listed across {} toolkit(s)",
+            scope.len()
+        )],
+    ))
 }
 
 /// Apply OpenHuman's curated-whitelist + user-scope visibility filter to
@@ -698,24 +496,11 @@ pub async fn composio_execute(
         return Ok(result);
     }
 
-    let kind = create_composio_client(config).map_err(|e| format!("[composio] execute: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => {
-            client.execute_tool(tool, arguments).await.map_err(|e| {
-                report_composio_op_error("execute", &e);
-                format!("[composio] execute failed: {e:#}")
-            })?
-        }
-        ComposioClientKind::Direct(direct) => {
-            tracing::info!(
-                tool = %tool,
-                "[composio-direct] execute: routing to user's personal Composio tenant"
-            );
-            super::client::direct_execute(&direct, tool, arguments, &config.composio.entity_id)
-                .await
-                .map_err(|e| format!("[composio-direct] execute failed: {e:#}"))?
-        }
-    };
+    let ComposioClientKind::Direct(direct) =
+        create_composio_client(config).map_err(|e| format!("[composio] execute: {e}"))?;
+    let resp = super::client::direct_execute(&direct, tool, arguments, &config.composio.entity_id)
+        .await
+        .map_err(|e| format!("[composio-direct] execute failed: {e:#}"))?;
     Ok(RpcOutcome::new(
         resp,
         vec![format!("composio: executed tool {tool}")],
@@ -725,26 +510,15 @@ pub async fn composio_execute(
 // ── GitHub repos + trigger provisioning ─────────────────────────────
 
 pub async fn composio_list_github_repos(
-    config: &Config,
+    _config: &Config,
     connection_id: Option<String>,
 ) -> OpResult<RpcOutcome<ComposioGithubReposResponse>> {
     tracing::debug!(?connection_id, "[composio] rpc list_github_repos");
-    let client = resolve_client(config)?;
-    let resp = client
-        .list_github_repos(connection_id.as_deref())
-        .await
-        .map_err(|e| {
-            report_composio_op_error("list_github_repos", &e);
-            format!("[composio] list_github_repos failed: {e:#}")
-        })?;
-    let count = resp.repositories.len();
-    let connection_id = resp.connection_id.clone();
-    Ok(RpcOutcome::new(
-        resp,
-        vec![format!(
-            "composio: {count} github repo(s) listed for connection {connection_id}"
-        )],
-    ))
+    Err(
+        "[composio] github repo listing through the OpenHuman backend has been removed; \
+         use the native GitHub OAuth provider instead"
+            .to_string(),
+    )
 }
 
 pub async fn composio_create_trigger(
@@ -754,26 +528,15 @@ pub async fn composio_create_trigger(
     trigger_config: Option<serde_json::Value>,
 ) -> OpResult<RpcOutcome<ComposioCreateTriggerResponse>> {
     tracing::debug!(slug = %slug, ?connection_id, "[composio] rpc create_trigger");
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] create_trigger: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => client
-            .create_trigger(slug, connection_id.as_deref(), trigger_config)
-            .await
-            .map_err(|e| {
-                report_composio_op_error("create_trigger", &e);
-                format!("[composio] create_trigger failed: {e:#}")
-            })?,
-        ComposioClientKind::Direct(direct) => {
-            ensure_subscription_for_trigger_write(config, &direct, slug).await?;
-            direct_create_trigger(&direct, slug, connection_id.as_deref(), trigger_config)
-                .await
-                .map_err(|e| {
-                    report_composio_op_error("create_trigger", &e);
-                    format!("[composio] create_trigger failed: {e:#}")
-                })?
-        }
-    };
+    ensure_subscription_for_trigger_write(config, &direct, slug).await?;
+    let resp = direct_create_trigger(&direct, slug, connection_id.as_deref(), trigger_config)
+        .await
+        .map_err(|e| {
+            report_composio_op_error("create_trigger", &e);
+            format!("[composio] create_trigger failed: {e:#}")
+        })?;
     let trigger_id = resp.trigger_id.clone();
     Ok(RpcOutcome::new(
         resp,
@@ -791,23 +554,15 @@ pub async fn composio_list_available_triggers(
     connection_id: Option<String>,
 ) -> OpResult<RpcOutcome<ComposioAvailableTriggersResponse>> {
     tracing::debug!(toolkit = %toolkit, ?connection_id, "[composio] rpc list_available_triggers");
-    let kind = create_composio_client(config)
+    let ComposioClientKind::Direct(direct) = create_composio_client(config)
         .map_err(|e| format!("[composio] list_available_triggers: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => client
-            .list_available_triggers(toolkit, connection_id.as_deref())
-            .await
-            .map_err(|e| {
-                report_composio_op_error("list_available_triggers", &e);
-                format!("[composio] list_available_triggers failed: {e:#}")
-            })?,
-        ComposioClientKind::Direct(direct) => direct_list_available_triggers(&direct, toolkit)
-            .await
-            .map_err(|e| {
-                report_composio_op_error("list_available_triggers", &e);
-                format!("[composio] list_available_triggers failed: {e:#}")
-            })?,
-    };
+    let _ = connection_id;
+    let resp = direct_list_available_triggers(&direct, toolkit)
+        .await
+        .map_err(|e| {
+            report_composio_op_error("list_available_triggers", &e);
+            format!("[composio] list_available_triggers failed: {e:#}")
+        })?;
     let count = resp.triggers.len();
     Ok(RpcOutcome::new(
         resp,
@@ -822,25 +577,14 @@ pub async fn composio_list_triggers(
     toolkit: Option<String>,
 ) -> OpResult<RpcOutcome<ComposioActiveTriggersResponse>> {
     tracing::debug!(?toolkit, "[composio] rpc list_triggers");
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] list_triggers: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => client
-            .list_active_triggers(toolkit.as_deref())
-            .await
-            .map_err(|e| {
-                report_composio_op_error("list_triggers", &e);
-                format!("[composio] list_triggers failed: {e:#}")
-            })?,
-        ComposioClientKind::Direct(direct) => {
-            direct_list_active_triggers(&direct, toolkit.as_deref())
-                .await
-                .map_err(|e| {
-                    report_composio_op_error("list_triggers", &e);
-                    format!("[composio] list_triggers failed: {e:#}")
-                })?
-        }
-    };
+    let resp = direct_list_active_triggers(&direct, toolkit.as_deref())
+        .await
+        .map_err(|e| {
+            report_composio_op_error("list_triggers", &e);
+            format!("[composio] list_triggers failed: {e:#}")
+        })?;
     let count = resp.triggers.len();
     Ok(RpcOutcome::new(
         resp,
@@ -855,26 +599,15 @@ pub async fn composio_enable_trigger(
     trigger_config: Option<serde_json::Value>,
 ) -> OpResult<RpcOutcome<ComposioEnableTriggerResponse>> {
     tracing::debug!(slug = %slug, connection_id = %connection_id, "[composio] rpc enable_trigger");
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] enable_trigger: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => client
-            .enable_trigger(connection_id, slug, trigger_config)
-            .await
-            .map_err(|e| {
-                report_composio_op_error("enable_trigger", &e);
-                format!("[composio] enable_trigger failed: {e:#}")
-            })?,
-        ComposioClientKind::Direct(direct) => {
-            ensure_subscription_for_trigger_write(config, &direct, slug).await?;
-            direct_enable_trigger(&direct, connection_id, slug, trigger_config)
-                .await
-                .map_err(|e| {
-                    report_composio_op_error("enable_trigger", &e);
-                    format!("[composio] enable_trigger failed: {e:#}")
-                })?
-        }
-    };
+    ensure_subscription_for_trigger_write(config, &direct, slug).await?;
+    let resp = direct_enable_trigger(&direct, connection_id, slug, trigger_config)
+        .await
+        .map_err(|e| {
+            report_composio_op_error("enable_trigger", &e);
+            format!("[composio] enable_trigger failed: {e:#}")
+        })?;
     let trigger_id = resp.trigger_id.clone();
     Ok(RpcOutcome::new(
         resp,
@@ -887,22 +620,14 @@ pub async fn composio_disable_trigger(
     trigger_id: &str,
 ) -> OpResult<RpcOutcome<ComposioDisableTriggerResponse>> {
     tracing::debug!(trigger_id = %trigger_id, "[composio] rpc disable_trigger");
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] disable_trigger: {e}"))?;
-    let resp = match kind {
-        ComposioClientKind::Backend(client) => {
-            client.disable_trigger(trigger_id).await.map_err(|e| {
-                report_composio_op_error("disable_trigger", &e);
-                format!("[composio] disable_trigger failed: {e:#}")
-            })?
-        }
-        ComposioClientKind::Direct(direct) => direct_disable_trigger(&direct, trigger_id)
-            .await
-            .map_err(|e| {
-                report_composio_op_error("disable_trigger", &e);
-                format!("[composio] disable_trigger failed: {e:#}")
-            })?,
-    };
+    let resp = direct_disable_trigger(&direct, trigger_id)
+        .await
+        .map_err(|e| {
+            report_composio_op_error("disable_trigger", &e);
+            format!("[composio] disable_trigger failed: {e:#}")
+        })?;
     let message = if resp.deleted {
         format!("composio: disabled trigger {trigger_id}")
     } else {
@@ -1214,8 +939,8 @@ pub async fn composio_list_trigger_history(
 // `composio_get_user_profile` and `composio_sync` route through the
 // per-toolkit `ComposioProvider` registry instead of executing a
 // single Composio action directly. The caller passes a `connection_id`,
-// the op resolves the connection's toolkit slug from the backend, looks
-// up the provider, and dispatches to it.
+// the op resolves the connection's toolkit slug from the user's direct
+// Composio tenant, looks up the provider, and dispatches to it.
 //
 // These exist because individual toolkits need to do *several*
 // `composio.execute` calls + bespoke result reshaping to produce a
@@ -1223,36 +948,6 @@ pub async fn composio_list_trigger_history(
 // RPC method keeps the UI/agent surface tiny and consistent across
 // toolkits.
 
-/// Look up the toolkit slug for an existing connection. Returns an
-/// error string if the connection is unknown to the backend.
-async fn resolve_toolkit_for_connection(
-    client: &ComposioClient,
-    connection_id: &str,
-) -> OpResult<String> {
-    tracing::debug!(connection_id = %connection_id, "[composio] resolve_toolkit_for_connection");
-    let resp = client.list_connections().await.map_err(|e| {
-        report_composio_op_error("resolve_toolkit_for_connection", &e);
-        format!("[composio] list_connections failed: {e:#}")
-    })?;
-    let conn = resp
-        .connections
-        .into_iter()
-        .find(|c| c.id == connection_id)
-        .ok_or_else(|| format!("[composio] no connection with id '{connection_id}'"))?;
-    Ok(conn.toolkit)
-}
-
-/// Mode-aware sibling of [`resolve_toolkit_for_connection`]. Looks up
-/// the toolkit slug via the factory, so direct-mode users (no backend
-/// session token, BYO Composio API key) still resolve the connection
-/// against **their own** Composio tenant. Used by ops whose data-path
-/// runs through the mode-aware [`ProviderContext::execute`] —
-/// [`composio_sync`] today; analogous callers can be migrated later by
-/// swapping `resolve_client(config)` + `resolve_toolkit_for_connection`
-/// for a single call to this helper.
-///
-/// Returns the same `connection unknown` error shape as the legacy
-/// helper so existing UI / agent error handling continues to work.
 async fn resolve_toolkit_for_connection_mode_aware(
     config: &Config,
     connection_id: &str,
@@ -1261,26 +956,12 @@ async fn resolve_toolkit_for_connection_mode_aware(
         connection_id = %connection_id,
         "[composio] resolve_toolkit_for_connection_mode_aware"
     );
-    let kind =
+    let ComposioClientKind::Direct(direct) =
         create_composio_client(config).map_err(|e| format!("[composio] resolve_toolkit: {e}"))?;
-    let connections = match kind {
-        ComposioClientKind::Backend(client) => {
-            let resp = client.list_connections().await.map_err(|e| {
-                report_composio_op_error("resolve_toolkit_for_connection", &e);
-                format!("[composio] list_connections failed: {e:#}")
-            })?;
-            resp.connections
-        }
-        ComposioClientKind::Direct(direct) => {
-            // Walk the user's personal Composio v3 tenant rather than
-            // the (non-existent) backend session. Mirrors the direct
-            // arm in [`composio_list_connections`] (#1710).
-            let resp = direct_list_connections(&direct)
-                .await
-                .map_err(|e| format!("[composio-direct] list_connections failed: {e:#}"))?;
-            resp.connections
-        }
-    };
+    let resp = direct_list_connections(&direct)
+        .await
+        .map_err(|e| format!("[composio-direct] list_connections failed: {e:#}"))?;
+    let connections = resp.connections;
     connections
         .into_iter()
         .find(|c| c.id == connection_id)
@@ -1351,33 +1032,11 @@ pub async fn composio_refresh_all_identities(
     config: &Config,
 ) -> OpResult<RpcOutcome<RefreshIdentitiesReport>> {
     tracing::info!("[composio] rpc refresh_all_identities");
-    // Mode-aware: mirrors `periodic::run_one_tick` (the only other
-    // op that needs to enumerate ALL connections in a single pass).
-    // Backend mode walks the tinyhumans aggregator's view; direct
-    // mode walks the user's personal Composio v3 tenant via
-    // `direct_list_connections`. The iterate-and-fetch_user_profile
-    // loop below is already mode-aware — every Composio action runs
-    // through `ProviderContext::execute`, which re-resolves a fresh
-    // client per call (the #1710 contract).
-    let kind = create_composio_client(config)
+    let ComposioClientKind::Direct(direct) = create_composio_client(config)
         .map_err(|e| format!("[composio] refresh_all_identities: {e}"))?;
-    let conns = match kind {
-        ComposioClientKind::Backend(client) => {
-            tracing::debug!("[composio] refresh_all_identities: backend variant");
-            client.list_connections().await.map_err(|e| {
-                report_composio_op_error("refresh_all_identities", &e);
-                format!("[composio] list_connections failed: {e:#}")
-            })?
-        }
-        ComposioClientKind::Direct(direct) => {
-            tracing::info!(
-                "[composio-direct] refresh_all_identities: walking user's personal Composio tenant"
-            );
-            direct_list_connections(&direct)
-                .await
-                .map_err(|e| format!("[composio-direct] list_connections failed: {e:#}"))?
-        }
-    };
+    let conns = direct_list_connections(&direct)
+        .await
+        .map_err(|e| format!("[composio-direct] list_connections failed: {e:#}"))?;
 
     let mut report = RefreshIdentitiesReport::default();
     let mut messages: Vec<String> = Vec::with_capacity(conns.connections.len() + 1);
@@ -1478,15 +1137,6 @@ pub async fn composio_sync(
         reason = reason.as_str(),
         "[composio] rpc sync"
     );
-    // Mode-aware: works for backend-proxied users AND direct-mode users
-    // (BYO Composio API key, no backend session token). Previously this
-    // gated on `resolve_client(config)?` which always required a backend
-    // session — direct-mode users hit "composio unavailable: no backend
-    // session token" even after a successful authorize + active
-    // connection.  The actual data path inside `provider.sync()` runs
-    // every Composio action through `ProviderContext::execute`, which is
-    // already mode-aware (#1710), so once we have the toolkit slug the
-    // rest is identical regardless of mode.
     let toolkit = resolve_toolkit_for_connection_mode_aware(config, connection_id).await?;
 
     let provider = get_provider(&toolkit).ok_or_else(|| {
@@ -1872,200 +1522,57 @@ pub async fn fetch_connected_integrations_status(
     }
 }
 
-/// The actual backend fetch, called on cache miss.
-///
-/// **Stubbed for the local-OAuth refactor**: returns `Unavailable`
-/// (`None`) without making a network call. Composio backend access
-/// was removed; the agent's "connected integrations" surface is
-/// expected to be re-sourced from `AuthService` profiles in a follow-up
-/// (it currently sees zero connections, which prompts the user-visible
-/// "no connections" state in the agent prompt).
+/// The actual direct Composio fetch, called on cache miss.
 async fn fetch_connected_integrations_uncached(
     config: &Config,
 ) -> Option<Vec<ConnectedIntegration>> {
-    use super::client::{create_composio_client, direct_list_connections, ComposioClientKind};
+    use super::client::{create_composio_client, direct_list_connections, direct_list_tools};
     use super::providers::toolkit_description;
 
-    // Route via the mode-aware factory so the chat-agent's
-    // "connected_integrations" view reflects the live tenant — backend
-    // (tinyhumans) or direct (user's personal Composio). Prior to #1710
-    // Wave 3 this path called `build_composio_client` directly, which
-    // is backend-only — after a `composio.mode = "direct"` toggle the
-    // cache kept replaying the tinyhumans-tenant connections back into
-    // the integration overview (e.g. gmail / notion appearing as
-    // connected in direct mode even when the user's direct tenant had
-    // a different set of toolkits). Resolving per call closes the
-    // loop: `ComposioConfigChangedSubscriber` invalidates the cache on
-    // toggle and the next miss re-populates it from the live tenant.
-    let kind = match create_composio_client(config) {
-        Ok(kind) => kind,
+    let direct = match create_composio_client(config) {
+        Ok(ComposioClientKind::Direct(direct)) => direct,
         Err(e) => {
             tracing::debug!(
                 error = %e,
-                "[composio] fetch_connected_integrations: no client (not signed in?)"
+                "[composio] fetch_connected_integrations: no direct client"
             );
             return None;
         }
     };
 
-    // Pull the allowlist + connections + tool catalogue. Backend mode
-    // walks the tinyhumans tenant's curated allowlist via
-    // `list_toolkits`; direct mode has no centralised allowlist (per
-    // `ops::composio_list_toolkits`'s direct-mode branch) so the
-    // user's set of active connections IS the universe of valid
-    // toolkit arguments.
-    //
-    // On transient errors we return `None` instead of a degraded
-    // `Some(Vec::new())` so `fetch_connected_integrations` does NOT
-    // cache the failure. Caching an empty allowlist would hide every
-    // integration from the orchestrator until the process restarts or
-    // the cache is explicitly invalidated — a single 5xx during
-    // startup would silently break delegation for the whole session.
-    let (allowlisted_toolkits, connections, tools_by_toolkit): (
-        Vec<String>,
-        Vec<super::types::ComposioConnection>,
-        Vec<super::types::ComposioToolSchema>,
-    ) = match &kind {
-        ComposioClientKind::Backend(client) => {
-            let allowlist: Vec<String> = match client.list_toolkits().await {
-                Ok(resp) => resp
-                    .toolkits
-                    .into_iter()
-                    .map(|toolkit| toolkit.trim().to_ascii_lowercase())
-                    .filter(|toolkit| !toolkit.is_empty())
-                    .collect(),
-                Err(e) => {
-                    tracing::warn!(
-                        "[composio] fetch_connected_integrations: list_toolkits (backend) failed: {e}"
-                    );
-                    return None;
-                }
-            };
-
-            if allowlist.is_empty() {
-                tracing::debug!(
-                    "[composio] fetch_connected_integrations: backend allowlist is empty"
-                );
-                return Some(Vec::new());
-            }
-
-            let connections = match client.list_connections().await {
-                Ok(resp) => resp.connections,
-                Err(e) => {
-                    tracing::warn!(
-                        "[composio] fetch_connected_integrations: list_connections (backend) failed: {e}"
-                    );
-                    return None;
-                }
-            };
-
-            // Tool catalogue scoped to the active subset only —
-            // not-connected toolkits won't be invoked from a sub-agent.
-            let connected_slugs_for_tools: Vec<String> = {
-                let mut v: Vec<String> = connections
-                    .iter()
-                    .filter(|c| c.is_active())
-                    .map(|c| c.normalized_toolkit())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                v.sort();
-                v.dedup();
-                v
-            };
-            let tools = if connected_slugs_for_tools.is_empty() {
-                Vec::new()
-            } else {
-                match client.list_tools(Some(&connected_slugs_for_tools)).await {
-                    Ok(resp) => resp.tools,
-                    Err(e) => {
-                        tracing::warn!(
-                            "[composio] fetch_connected_integrations: list_tools (backend) failed: {e}"
-                        );
-                        return None;
-                    }
-                }
-            };
-
-            (allowlist, connections, tools)
-        }
-        ComposioClientKind::Direct(direct) => {
-            // Direct mode: walk the user's personal Composio tenant
-            // for *connection state* (active accounts on their key) —
-            // there's no central allowlist in direct mode, so the
-            // active set IS the allowlist.
-            //
-            // Tool *schemas* are tenant-agnostic — Composio's action
-            // definitions (e.g. GMAIL_SEND_EMAIL parameter shape) are
-            // identical regardless of which Composio tenant a user is
-            // connected via. So we best-effort fetch schemas through
-            // the backend client (curated list_tools) if a backend
-            // session is available, even though connection routing
-            // goes to the user's direct tenant. This preserves the
-            // chat agent's "21 gmail actions available" view while
-            // execution itself (via `ComposioActionTool` / Wave 1
-            // factory) still routes to the user's tenant. Direct-only
-            // users without a backend session get empty tools — that
-            // matches `composio_list_tools`'s direct-mode policy and
-            // the `subagent_runner` LazyToolkitResolver still resolves
-            // tools lazily at delegation time.
-            let connections = match direct_list_connections(direct).await {
-                Ok(resp) => resp.connections,
-                Err(e) => {
-                    tracing::warn!(
-                        "[composio] fetch_connected_integrations: list_connections (direct) failed: {e:#}"
-                    );
-                    return None;
-                }
-            };
-            let allowlist: Vec<String> = {
-                let mut v: Vec<String> = connections
-                    .iter()
-                    .filter(|c| c.is_active())
-                    .map(|c| c.normalized_toolkit())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                v.sort();
-                v.dedup();
-                v
-            };
-            if allowlist.is_empty() {
-                tracing::info!(
-                    "[composio-direct] fetch_connected_integrations: direct tenant has no active connections; returning empty overview"
-                );
-                return Some(Vec::new());
-            }
-            tracing::debug!(
-                connected = allowlist.len(),
-                "[composio-direct] fetch_connected_integrations: using direct tenant's active set as allowlist (no central allowlist in direct mode)"
+    let connections = match direct_list_connections(&direct).await {
+        Ok(resp) => resp.connections,
+        Err(e) => {
+            tracing::warn!(
+                "[composio] fetch_connected_integrations: list_connections failed: {e:#}"
             );
-
-            // Best-effort: pull tool schemas via the backend client
-            // (definitional source). Failure is non-fatal — we fall
-            // back to empty tools and let lazy resolution handle it.
-            let tools = match super::client::build_composio_client(config) {
-                Some(backend_client) => match backend_client.list_tools(Some(&allowlist)).await {
-                    Ok(resp) => {
-                        tracing::debug!(
-                            count = resp.tools.len(),
-                            "[composio-direct] fetch_connected_integrations: pulled tool schemas from backend (tenant-agnostic definitional source)"
-                        );
-                        resp.tools
-                    }
-                    Err(e) => {
-                        tracing::info!(
-                            "[composio-direct] fetch_connected_integrations: backend list_tools failed (will use lazy fallback at delegation time): {e:#}"
-                        );
-                        Vec::new()
-                    }
-                },
-                None => {
-                    tracing::info!(
-                        "[composio-direct] fetch_connected_integrations: no backend session for schema fetch; lazy fallback at delegation time"
-                    );
-                    Vec::new()
-                }
-            };
-            (allowlist, connections, tools)
+            return None;
+        }
+    };
+    let allowlisted_toolkits: Vec<String> = {
+        let mut v: Vec<String> = connections
+            .iter()
+            .filter(|c| c.is_active())
+            .map(|c| c.normalized_toolkit())
+            .filter(|t| !t.is_empty())
+            .collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    if allowlisted_toolkits.is_empty() {
+        tracing::info!(
+            "[composio-direct] fetch_connected_integrations: direct tenant has no active connections"
+        );
+        return Some(Vec::new());
+    }
+    let tools_by_toolkit = match direct_list_tools(&direct, &allowlisted_toolkits).await {
+        Ok(resp) => resp.tools,
+        Err(e) => {
+            tracing::warn!(
+                "[composio-direct] fetch_connected_integrations: list_tools failed: {e:#}"
+            );
+            Vec::new()
         }
     };
 
@@ -2077,8 +1584,8 @@ async fn fetch_connected_integrations_uncached(
         .filter(|toolkit| !toolkit.is_empty())
         .collect();
 
-    // Deduplicate the allowlist so a backend that returns duplicates
-    // doesn't produce dual entries downstream.
+    // Deduplicate the direct connection set so duplicate rows don't
+    // produce dual entries downstream.
     let mut unique_toolkits: Vec<String> = allowlisted_toolkits.clone();
     unique_toolkits.sort();
     unique_toolkits.dedup();
@@ -2150,65 +1657,9 @@ async fn fetch_connected_integrations_uncached(
     Some(integrations)
 }
 
-/// Just-in-time fetch of every available action for a single Composio
-/// toolkit, returned in the [`ConnectedIntegrationTool`] shape the
-/// `integrations_agent` spawn path expects.
-///
-/// Unlike [`fetch_connected_integrations`] (which bulk-fetches every
-/// connected toolkit's tools once per session and caches the result),
-/// this helper is uncached and scoped to a single toolkit — meant to
-/// be called at `integrations_agent` spawn time so the sub-agent's
-/// prompt always reflects the toolkit's current action catalogue.
-///
-/// The filter `starts_with("{TOOLKIT}_")` matches
-/// `fetch_connected_integrations_uncached`'s own namespacing rule so
-/// siblings like `github` / `git` don't leak into each other's buckets.
-///
-/// Returns an empty vec when the backend has no actions for the
-/// toolkit (valid steady state for a freshly-authorised integration
-/// whose catalogue hasn't been published yet). Returns `Err` only for
-/// transport / auth failures the caller should surface to the user.
-pub async fn fetch_toolkit_actions(
-    client: &ComposioClient,
-    toolkit: &str,
-) -> anyhow::Result<Vec<ConnectedIntegrationTool>> {
-    let toolkit_slug = toolkit.trim();
-    if toolkit_slug.is_empty() {
-        anyhow::bail!("fetch_toolkit_actions: toolkit must not be empty");
-    }
-    tracing::debug!(toolkit = %toolkit_slug, "[composio] fetch_toolkit_actions");
-    let resp = client
-        .list_tools(Some(&[toolkit_slug.to_string()]))
-        .await
-        .map_err(|e| anyhow::anyhow!("list_tools failed for toolkit `{toolkit_slug}`: {e}"))?;
-    let action_prefix = format!("{}_", toolkit_slug.to_uppercase());
-    // Apply curated whitelist + user scope so spawn-time tool
-    // discovery agrees with the bulk path and the meta-tool layer.
-    let pref = super::providers::load_user_scope_or_default(toolkit_slug).await;
-    let actions: Vec<ConnectedIntegrationTool> = resp
-        .tools
-        .into_iter()
-        .filter(|t| t.function.name.starts_with(&action_prefix))
-        .filter(|t| super::providers::is_action_visible_with_pref(&t.function.name, &pref))
-        .map(|t| ConnectedIntegrationTool {
-            name: t.function.name,
-            description: t.function.description.unwrap_or_default(),
-            parameters: t.function.parameters,
-        })
-        .collect();
-    tracing::debug!(
-        toolkit = %toolkit_slug,
-        action_count = actions.len(),
-        "[composio] fetch_toolkit_actions: done"
-    );
-    Ok(actions)
-}
-
-/// Direct-mode counterpart to [`fetch_toolkit_actions`].
-///
 /// Hits Composio v3 `/tools?toolkit_slugs=<toolkit>` against the user's
-/// personal tenant via [`direct_list_tools`] and applies the same curated-
-/// whitelist + user-scope filter the backend path uses, so the sub-agent
+/// personal tenant via [`direct_list_tools`] and applies the curated
+/// whitelist + user-scope filter, so the sub-agent
 /// sees a consistent action surface across modes.
 ///
 /// **Why this exists**: the session-start bulk fetch
@@ -2265,7 +1716,12 @@ pub async fn fetch_direct_toolkit_actions(
 /// key is stored. **The key itself is never returned** — only a boolean
 /// flag so the UI can show a "Connected" / "Not set" status.
 pub async fn composio_get_mode(config: &Config) -> OpResult<RpcOutcome<serde_json::Value>> {
-    let mode = config.composio.mode.trim().to_string();
+    let raw_mode = config.composio.mode.trim();
+    let mode = if raw_mode.is_empty() || raw_mode.eq_ignore_ascii_case("backend") {
+        crate::openhuman::config::schema::COMPOSIO_MODE_DIRECT.to_string()
+    } else {
+        raw_mode.to_string()
+    };
     let key_present = crate::openhuman::credentials::get_composio_api_key(config)
         .map_err(|e| format!("[composio-direct] get_composio_api_key failed: {e}"))?
         .is_some();
@@ -2361,8 +1817,8 @@ pub async fn composio_set_api_key(
     ))
 }
 
-/// Clear the stored direct-mode API key and reset
-/// `config.composio.mode` back to `"backend"`.
+/// Clear the stored direct-mode API key. Composio remains in direct
+/// mode; the next Composio call will ask the user to configure a key.
 pub async fn composio_clear_api_key(config: &Config) -> OpResult<RpcOutcome<serde_json::Value>> {
     tracing::debug!("[composio-direct] clear_api_key");
     crate::openhuman::credentials::clear_composio_api_key(config)
@@ -2372,34 +1828,29 @@ pub async fn composio_clear_api_key(config: &Config) -> OpResult<RpcOutcome<serd
     let mut cfg_mut = crate::openhuman::config::rpc::load_config_with_timeout()
         .await
         .map_err(|e| format!("[composio-direct] reload config failed: {e}"))?;
-    cfg_mut.composio.mode = crate::openhuman::config::schema::COMPOSIO_MODE_BACKEND.into();
+    cfg_mut.composio.mode = crate::openhuman::config::schema::COMPOSIO_MODE_DIRECT.into();
     cfg_mut
         .save()
         .await
         .map_err(|e| format!("[composio-direct] save config failed: {e}"))?;
 
     // [composio-cache] Symmetric with composio_set_api_key — any
-    // tenant-scoped caches that were populated while the user was in
-    // direct mode must be invalidated when we drop back to backend
-    // mode, otherwise the chat panel would keep showing the (now
-    // empty) direct-tenant state instead of the live backend tenant.
+    // tenant-scoped caches populated with the old key must be dropped
+    // when the key is cleared.
     crate::core::event_bus::publish_global(
         crate::core::event_bus::DomainEvent::ComposioConfigChanged {
-            mode: "backend".to_string(),
+            mode: crate::openhuman::config::schema::COMPOSIO_MODE_DIRECT.to_string(),
             api_key_set: false,
         },
     );
     tracing::debug!("[composio-cache] published ComposioConfigChanged after clear_api_key");
 
     Ok(RpcOutcome::new(
-        serde_json::json!({ "cleared": true, "mode": "backend" }),
-        vec!["composio: api key cleared, mode reset to backend".into()],
+        serde_json::json!({ "cleared": true, "mode": "direct" }),
+        vec!["composio: api key cleared; direct mode remains active".into()],
     ))
 }
 
-#[cfg(test)]
-#[path = "ops_test.rs"]
-mod tests;
 
 // ── Helpers re-exported so callers can pull connection/tool types without
 // reaching into the nested types module.

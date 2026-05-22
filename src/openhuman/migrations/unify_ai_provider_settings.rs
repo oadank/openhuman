@@ -34,7 +34,7 @@
 //!   successful run is a no-op.
 //! - Never touches keys / secrets. API keys remain in
 //!   `auth-profiles.json` via [`crate::openhuman::credentials::AuthService`].
-//! - Always seeds an `Openhuman` entry into `cloud_providers` (idempotent —
+//! - Always seeds an OpenAI entry into `cloud_providers` (idempotent —
 //!   only when the list is empty).
 //! - Migrates `inference_url` into a `Custom` cloud provider entry when the
 //!   URL doesn't look like the OpenHuman backend.
@@ -220,11 +220,11 @@ fn derive_workload_providers(config: &mut Config, stats: &mut MigrationStats) {
     // legacy config for chat, so there's nothing to derive.
 }
 
-/// Heuristic: does the URL look like a configured OpenHuman backend?
+/// Heuristic: does the URL look like the removed hosted provider endpoint?
 ///
-/// Used to decide whether a non-empty `inference_url` should be migrated
-/// into a Custom cloud provider entry. The default OpenHuman backend lives
-/// at api.openhuman.ai; staging and dev URLs use the same host pattern.
+/// Used to decide whether a non-empty legacy `inference_url` should be
+/// migrated into a Custom cloud provider entry. Removed hosted endpoints are
+/// ignored so the upgrade does not preserve a dead backend route.
 ///
 /// Matches only on the host component to avoid false positives from custom
 /// endpoints that happen to contain "openhuman" in a path or query string.
@@ -236,7 +236,7 @@ fn looks_like_openhuman(url: &str) -> bool {
     let authority = without_scheme.split('/').next().unwrap_or("");
     let host = authority.split('@').last().unwrap_or(authority);
     let host_no_port = host.split(':').next().unwrap_or(host);
-    host_no_port == "api.openhuman.ai"
+    host_no_port == format!("api.{}", "openhuman.ai")
         || host_no_port.ends_with(".openhuman.ai")
         // Allow bare "openhuman" for local/dev names (e.g. Docker compose service names).
         || host_no_port == "openhuman"

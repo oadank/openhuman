@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // Indonesian (Bahasa Indonesia) chunk 5/5. Translated from chunks/en-5.ts.
 const id5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'Tingkatkan',
-  'settings.billing.subscription.waiting': 'Menunggu',
-  'settings.billing.subscription.waitingPayment': 'Menunggu pembayaran',
   'settings.composio.apiKeyDesc': 'API key Composio saat ini tersimpan di perangkat ini.',
   'settings.composio.apiKeyLabel': 'API key Composio',
   'settings.composio.apiKeyStored': 'API key tersimpan',
@@ -358,22 +354,6 @@ const id5: TranslationMap = {
   'skills.uninstall.title': 'Copot',
   'skills.uninstall.uninstallBtn': 'Copot',
   'skills.uninstall.uninstalling': 'Mencopot…',
-  'upsell.global.limitMessage': 'Upgrade paket atau isi ulang kredit untuk melanjutkan',
-  'upsell.global.limitTitle': 'Anda',
-  'upsell.global.nearLimitMessage':
-    'Anda telah menggunakan {pct}% dari batas pemakaian. Upgrade untuk batas lebih tinggi.',
-  'upsell.global.nearLimitTitle': 'Mendekati batas pemakaian',
-  'upsell.usageLimit.bodyBudget':
-    'Anda telah mencapai batas mingguan.{reset} Tingkatkan paket Anda atau isi ulang kredit untuk menghindari batas.',
-  'upsell.usageLimit.bodyRate':
-    'Anda telah mencapai batas laju inferensi 10 jam.{reset} Tingkatkan untuk batas yang lebih tinggi.',
-  'upsell.usageLimit.heading': 'Batas Pemakaian Tercapai',
-  'upsell.usageLimit.notNow': 'Tidak sekarang',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'Akan direset {time}.',
-  'upsell.usageLimit.upgradePlan': 'Upgrade paket',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': 'Ayo mulai!',
   'walkthrough.tooltip.next': 'Berikutnya →',
   'walkthrough.tooltip.skip': 'Lewati tur',

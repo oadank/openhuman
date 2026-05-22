@@ -17,11 +17,8 @@
 //! # Usage
 //!
 //! ```sh
-//! # Drive a real orchestrator turn — needs BACKEND_URL set so the
-//! # integrations client can fetch the user's Connected Integrations.
-//! BACKEND_URL=https://staging-api.tinyhumans.ai \
-//!   OPENHUMAN_APP_ENV=staging \
-//!   RUST_LOG=info,openhuman_core::openhuman::agent=debug,openhuman_core::openhuman::inference=debug \
+//! # Drive a real orchestrator turn with the live local config.
+//! RUST_LOG=info,openhuman_core::openhuman::agent=debug,openhuman_core::openhuman::inference=debug \
 //!   cargo run --bin inference-probe -- \
 //!     --mode harness --prompt "hey list my top 5 emails"
 //!

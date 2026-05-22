@@ -1,5 +1,4 @@
-//! Direct GitHub REST API client. Replaces the Composio slugs that
-//! went through `/agent-integrations/composio/execute` with direct
+//! Direct GitHub REST API client. Replaces Composio action execution with
 //! calls to `https://api.github.com`. Authentication uses the Bearer
 //! token persisted by [`crate::openhuman::oauth`] for the `github`
 //! provider.

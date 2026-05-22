@@ -5,11 +5,13 @@
 //! etc.); this module handles the client-side routing and skill dispatch.
 
 pub mod bus;
+mod global;
 pub mod ops;
 pub mod router;
 mod schemas;
 pub mod types;
 
+pub use global::{global_webhook_router, init_global_webhook_router};
 pub use router::WebhookRouter;
 pub use schemas::{
     all_controller_schemas as all_webhooks_controller_schemas,

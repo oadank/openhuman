@@ -77,8 +77,8 @@ pub fn learning_schemas(function: &str) -> ControllerSchema {
         "learning_linkedin_enrichment" => ControllerSchema {
             namespace: "learning",
             function: "linkedin_enrichment",
-            description: "Search Gmail for LinkedIn profile URLs, scrape the profile via Apify, \
-                          and persist the result to memory. Runs the full enrichment pipeline.",
+            description: "Search Gmail for LinkedIn profile URLs and persist a local profile note. \
+                          Runs the LinkedIn enrichment pipeline.",
             inputs: vec![FieldSchema {
                 name: "profile_url",
                 ty: TypeSchema::Option(Box::new(TypeSchema::String)),
@@ -97,7 +97,7 @@ pub fn learning_schemas(function: &str) -> ControllerSchema {
                 FieldSchema {
                     name: "profile_data",
                     ty: TypeSchema::Option(Box::new(TypeSchema::Json)),
-                    comment: "Scraped LinkedIn profile JSON from Apify, if successful.",
+                    comment: "LinkedIn profile JSON, if available.",
                     required: false,
                 },
                 FieldSchema {

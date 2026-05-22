@@ -219,7 +219,7 @@ const developerItems = [
     id: 'triggers',
     title: 'Composio Triggers (Direct Mode)',
     description:
-      'Set up the ngrok tunnel + local webhook receiver that lets direct-mode Composio triggers deliver events without the OpenHuman backend.',
+      'Set up the ngrok tunnel + local webhook receiver for direct-mode Composio triggers.',
     route: 'triggers',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

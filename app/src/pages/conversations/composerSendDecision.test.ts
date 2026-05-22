@@ -13,24 +13,10 @@ describe('evaluateComposerSend', () => {
       rawText: '   ',
       selectedThreadId: 'thread-1',
       composerInteractionBlocked: false,
-      isAtLimit: false,
       socketStatus: 'connected',
     });
 
     expect(decision).toEqual({ shouldSend: false, trimmedText: '', blockReason: 'empty_input' });
-  });
-
-  it('blocks usage limit', () => {
-    const decision = evaluateComposerSend({
-      rawText: 'hello',
-      selectedThreadId: 'thread-1',
-      composerInteractionBlocked: false,
-      isAtLimit: true,
-      socketStatus: 'connected',
-    });
-
-    expect(decision.blockReason).toBe('usage_limit_reached');
-    expect(decision.shouldSend).toBe(false);
   });
 
   it('blocks when no thread is selected', () => {
@@ -38,7 +24,6 @@ describe('evaluateComposerSend', () => {
       rawText: 'hello',
       selectedThreadId: null,
       composerInteractionBlocked: false,
-      isAtLimit: false,
       socketStatus: 'connected',
     });
 
@@ -51,7 +36,6 @@ describe('evaluateComposerSend', () => {
       rawText: 'hello',
       selectedThreadId: 'thread-1',
       composerInteractionBlocked: true,
-      isAtLimit: false,
       socketStatus: 'connected',
     });
 
@@ -64,7 +48,6 @@ describe('evaluateComposerSend', () => {
       rawText: 'hello',
       selectedThreadId: 'thread-1',
       composerInteractionBlocked: false,
-      isAtLimit: false,
       socketStatus: 'disconnected',
     });
 
@@ -77,7 +60,6 @@ describe('evaluateComposerSend', () => {
       rawText: ' hello ',
       selectedThreadId: 'thread-1',
       composerInteractionBlocked: false,
-      isAtLimit: false,
       socketStatus: 'connected',
     });
 
@@ -130,16 +112,6 @@ describe('shouldSendComposerKeyDown', () => {
 });
 
 describe('getComposerBlockedSendFeedback', () => {
-  it('returns modal and error feedback for usage-limit blocking', () => {
-    expect(getComposerBlockedSendFeedback('usage_limit_reached')).toEqual({
-      showLimitModal: true,
-      error: {
-        code: 'usage_limit_reached',
-        message: 'Usage limit reached. Upgrade or wait for reset.',
-      },
-    });
-  });
-
   it('returns send error feedback for socket-disconnected blocking', () => {
     expect(getComposerBlockedSendFeedback('socket_disconnected')).toEqual({
       showLimitModal: false,

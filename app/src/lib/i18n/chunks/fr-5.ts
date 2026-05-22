@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // French (Français) chunk 5/5. Translated from chunks/en-5.ts.
 const fr5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'Passer à la version supérieure',
-  'settings.billing.subscription.waiting': 'En attente',
-  'settings.billing.subscription.waitingPayment': 'En attente de paiement',
   'settings.composio.apiKeyDesc': 'Une clé API Composio est actuellement stockée sur cet appareil.',
   'settings.composio.apiKeyLabel': 'Clé API Composio',
   'settings.composio.apiKeyStored': 'Clé API stockée',
@@ -363,22 +359,6 @@ const fr5: TranslationMap = {
   'skills.uninstall.title': 'Désinstaller',
   'skills.uninstall.uninstallBtn': 'Désinstaller',
   'skills.uninstall.uninstalling': 'Désinstallation…',
-  'upsell.global.limitMessage': 'Mets à niveau ton plan ou recharge des crédits pour continuer',
-  'upsell.global.limitTitle': 'Toi',
-  'upsell.global.nearLimitMessage':
-    "Tu as utilisé {pct}% de ta limite d'utilisation. Mets à niveau pour des limites plus élevées.",
-  'upsell.global.nearLimitTitle': "Limite d'utilisation proche",
-  'upsell.usageLimit.bodyBudget':
-    'Vous avez atteint votre limite hebdomadaire.{reset} Améliorez votre forfait ou rechargez des crédits pour éviter les limites.',
-  'upsell.usageLimit.bodyRate':
-    "Vous avez atteint votre limite de taux d'inférence sur 10 heures.{reset} Améliorez pour des limites plus élevées.",
-  'upsell.usageLimit.heading': "Limite d'utilisation atteinte",
-  'upsell.usageLimit.notNow': 'Pas maintenant',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'Réinitialisation {time}.',
-  'upsell.usageLimit.upgradePlan': 'Mettre à niveau le plan',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': "C'est parti !",
   'walkthrough.tooltip.next': 'Suivant →',
   'walkthrough.tooltip.skip': 'Passer la visite',

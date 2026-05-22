@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // Bengali (বাংলা) chunk 5/5. Translated from chunks/en-5.ts.
 const bn5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'আপগ্রেড করুন',
-  'settings.billing.subscription.waiting': 'অপেক্ষা করছে',
-  'settings.billing.subscription.waitingPayment': 'পেমেন্টের অপেক্ষায়',
   'settings.composio.apiKeyDesc': 'এই ডিভাইসে বর্তমানে একটি Composio API key সংরক্ষিত আছে।',
   'settings.composio.apiKeyLabel': 'Composio API key',
   'settings.composio.apiKeyStored': 'API key সংরক্ষিত',
@@ -356,22 +352,6 @@ const bn5: TranslationMap = {
   'skills.uninstall.title': 'আনইনস্টল',
   'skills.uninstall.uninstallBtn': 'আনইনস্টল',
   'skills.uninstall.uninstalling': 'আনইনস্টল হচ্ছে…',
-  'upsell.global.limitMessage': 'চালিয়ে যেতে আপনার প্ল্যান আপগ্রেড করুন বা ক্রেডিট টপ আপ করুন',
-  'upsell.global.limitTitle': 'আপনি',
-  'upsell.global.nearLimitMessage':
-    'আপনি আপনার ব্যবহার সীমার {pct}% ব্যবহার করেছেন। উচ্চ সীমার জন্য আপগ্রেড করুন।',
-  'upsell.global.nearLimitTitle': 'ব্যবহার সীমার কাছাকাছি',
-  'upsell.usageLimit.bodyBudget':
-    'আপনি সাপ্তাহিক সীমায় পৌঁছেছেন।{reset} সীমা এড়াতে আপনার প্ল্যান আপগ্রেড করুন বা ক্রেডিট টপ আপ করুন।',
-  'upsell.usageLimit.bodyRate':
-    'আপনি ১০-ঘণ্টার ইনফারেন্স রেট সীমায় পৌঁছেছেন।{reset} উচ্চতর সীমার জন্য আপগ্রেড করুন।',
-  'upsell.usageLimit.heading': 'ব্যবহার সীমা পৌঁছেছে',
-  'upsell.usageLimit.notNow': 'এখন না',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'এটি {time} রিসেট হবে।',
-  'upsell.usageLimit.upgradePlan': 'প্ল্যান আপগ্রেড করুন',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': 'চলুন শুরু করি!',
   'walkthrough.tooltip.next': 'পরবর্তী →',
   'walkthrough.tooltip.skip': 'ট্যুর এড়িয়ে যান',

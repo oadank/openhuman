@@ -259,16 +259,11 @@ mod tests {
         assert_eq!(memory_search.route["method"], json!("tools/call"));
         assert_eq!(memory_search.health, ToolRegistryHealth::Available);
 
-        let web_search = entries
+        let memory_controller = entries
             .iter()
-            .find(|entry| entry.tool_id == "tools.web_search")
-            .expect("tools.web_search controller tool");
-        assert_eq!(web_search.transport, ToolRegistryTransport::JsonRpc);
-        assert_eq!(
-            web_search.route["method"],
-            json!("openhuman.tools_web_search")
-        );
-        assert_eq!(web_search.input_schema["type"], json!("object"));
+            .find(|entry| entry.transport == ToolRegistryTransport::JsonRpc)
+            .expect("at least one controller tool");
+        assert_eq!(memory_controller.input_schema["type"], json!("object"));
     }
 
     #[test]

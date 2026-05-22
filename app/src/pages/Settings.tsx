@@ -7,7 +7,6 @@ import AIPanel from '../components/settings/panels/AIPanel';
 import AppearancePanel from '../components/settings/panels/AppearancePanel';
 import AutocompleteDebugPanel from '../components/settings/panels/AutocompleteDebugPanel';
 import AutocompletePanel from '../components/settings/panels/AutocompletePanel';
-import BillingPanel from '../components/settings/panels/BillingPanel';
 import ComposioPanel from '../components/settings/panels/ComposioPanel';
 import ComposioTriagePanel from '../components/settings/panels/ComposioTriagePanel';
 import ConnectionsPanel from '../components/settings/panels/ConnectionsPanel';
@@ -24,15 +23,10 @@ import PrivacyPanel from '../components/settings/panels/PrivacyPanel';
 import RecoveryPhrasePanel from '../components/settings/panels/RecoveryPhrasePanel';
 import ScreenAwarenessDebugPanel from '../components/settings/panels/ScreenAwarenessDebugPanel';
 import ScreenIntelligencePanel from '../components/settings/panels/ScreenIntelligencePanel';
-import TeamInvitesPanel from '../components/settings/panels/TeamInvitesPanel';
-import TeamManagementPanel from '../components/settings/panels/TeamManagementPanel';
-import TeamMembersPanel from '../components/settings/panels/TeamMembersPanel';
-import TeamPanel from '../components/settings/panels/TeamPanel';
 import ToolsPanel from '../components/settings/panels/ToolsPanel';
 import TriggersPanel from '../components/settings/panels/TriggersPanel';
 import VoiceDebugPanel from '../components/settings/panels/VoiceDebugPanel';
 import VoicePanel from '../components/settings/panels/VoicePanel';
-import WebhooksDebugPanel from '../components/settings/panels/WebhooksDebugPanel';
 import SettingsHome from '../components/settings/SettingsHome';
 import SettingsSectionPage from '../components/settings/SettingsSectionPage';
 import { useT } from '../lib/i18n/I18nContext';
@@ -48,16 +42,6 @@ const RecoveryPhraseIcon = (
       strokeLinejoin="round"
       strokeWidth={2}
       d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"
-    />
-  </svg>
-);
-const TeamIcon = (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
     />
   </svg>
 );
@@ -181,13 +165,6 @@ const Settings = () => {
       icon: RecoveryPhraseIcon,
     },
     {
-      id: 'team',
-      title: t('pages.settings.account.team'),
-      description: t('pages.settings.account.teamDesc'),
-      route: 'team',
-      icon: TeamIcon,
-    },
-    {
       id: 'connections',
       title: t('pages.settings.account.connections'),
       description: t('pages.settings.account.connectionsDesc'),
@@ -286,23 +263,9 @@ const Settings = () => {
             />
           )}
         />
-        {/* Account & Billing leaf panels */}
+        {/* Account leaf panels */}
         <Route path="recovery-phrase" element={wrapSettingsPage(<RecoveryPhrasePanel />)} />
-        <Route path="team" element={wrapSettingsPage(<TeamPanel />)} />
-        <Route path="team/manage/:teamId" element={wrapSettingsPage(<TeamManagementPanel />)} />
-        <Route
-          path="team/manage/:teamId/members"
-          element={wrapSettingsPage(<TeamMembersPanel />)}
-        />
-        <Route
-          path="team/manage/:teamId/invites"
-          element={wrapSettingsPage(<TeamInvitesPanel />)}
-        />
-        <Route path="team/members" element={wrapSettingsPage(<TeamMembersPanel />)} />
-        <Route path="team/invites" element={wrapSettingsPage(<TeamInvitesPanel />)} />
         <Route path="connections" element={wrapSettingsPage(<ConnectionsPanel />)} />
-        {/* BillingPanel intentionally uses its own wider layout. */}
-        <Route path="billing" element={<BillingPanel />} />
         <Route path="privacy" element={wrapSettingsPage(<PrivacyPanel />)} />
         {/* Features leaf panels */}
         <Route path="screen-intelligence" element={wrapSettingsPage(<ScreenIntelligencePanel />)} />
@@ -329,7 +292,6 @@ const Settings = () => {
         <Route path="autocomplete-debug" element={wrapSettingsPage(<AutocompleteDebugPanel />)} />
         <Route path="voice-debug" element={wrapSettingsPage(<VoiceDebugPanel />)} />
         <Route path="local-model-debug" element={wrapSettingsPage(<LocalModelDebugPanel />)} />
-        <Route path="webhooks-debug" element={wrapSettingsPage(<WebhooksDebugPanel />)} />
         <Route path="memory-data" element={wrapSettingsPage(<MemoryDataPanel />)} />
         <Route path="memory-debug" element={wrapSettingsPage(<MemoryDebugPanel />)} />
         <Route path="intelligence" element={<Intelligence />} />

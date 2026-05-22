@@ -63,17 +63,6 @@ function Consumer({ captureCtx }: { captureCtx?: (ctx: CoreStateContextValue) =>
     <div>
       <span data-testid="user">{state.snapshot.auth.userId ?? 'none'}</span>
       <span data-testid="token">{state.snapshot.sessionToken ?? 'none'}</span>
-      <span data-testid="teams">{state.teams.map(t => t.team._id).join(',')}</span>
-      <span data-testid="members">
-        {Object.entries(state.teamMembersById)
-          .map(([k, v]) => `${k}:${v.length}`)
-          .join(',')}
-      </span>
-      <span data-testid="invites">
-        {Object.entries(state.teamInvitesById)
-          .map(([k, v]) => `${k}:${v.length}`)
-          .join(',')}
-      </span>
       <span data-testid="ready">{state.isReady ? 'ready' : 'boot'}</span>
     </div>
   );
@@ -94,129 +83,20 @@ function resetCoreStateStore() {
       localState: { encryptionKey: null, onboardingTasks: null },
       runtime: { screenIntelligence: null, localAi: null, autocomplete: null, service: null },
     },
-    teams: [],
-    teamMembersById: {},
-    teamInvitesById: {},
   });
 }
 
 describe('CoreStateProvider — identity-change cache clearing', () => {
   const fetchSnapshot = vi.mocked(coreStateApi.fetchCoreAppSnapshot);
-  const listTeams = vi.mocked(coreStateApi.listTeams);
-  const getTeamMembers = vi.mocked(coreStateApi.getTeamMembers);
-  const getTeamInvites = vi.mocked(coreStateApi.getTeamInvites);
 
   beforeEach(() => {
     fetchSnapshot.mockReset();
-    listTeams.mockReset();
-    getTeamMembers.mockReset();
-    getTeamInvites.mockReset();
     resetCoreStateStore();
     setActiveUserId(null);
   });
 
-  it('clears teams/members/invites when the userId changes between refreshes', async () => {
-    fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValue([{ team: { _id: 'team-u1' }, role: 'owner' } as never]);
-    getTeamMembers.mockResolvedValue([{ userId: 'u1' } as never]);
-    getTeamInvites.mockResolvedValue([{ id: 'invite-u1' } as never]);
-
-    let ctx: CoreStateContextValue | undefined;
-    render(
-      <CoreStateProvider>
-        <Consumer
-          captureCtx={next => {
-            ctx = next;
-          }}
-        />
-      </CoreStateProvider>
-    );
-
-    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('u1'));
-    await waitFor(() => expect(screen.getByTestId('teams').textContent).toBe('team-u1'));
-
-    // Seed team-scoped caches we expect to be wiped on identity flip.
-    await act(async () => {
-      await ctx!.refreshTeamMembers('team-u1');
-      await ctx!.refreshTeamInvites('team-u1');
-    });
-    expect(screen.getByTestId('members').textContent).toBe('team-u1:1');
-    expect(screen.getByTestId('invites').textContent).toBe('team-u1:1');
-
-    // Flip identity: next refresh returns u2.
-    fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u2', sessionToken: 'tok2' }));
-    listTeams.mockResolvedValue([]);
-    await act(async () => {
-      await ctx!.refresh();
-    });
-
-    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('u2'));
-    expect(screen.getByTestId('teams').textContent).toBe('');
-    expect(screen.getByTestId('members').textContent).toBe('');
-    expect(screen.getByTestId('invites').textContent).toBe('');
-  });
-
-  it('clears scoped caches when transitioning authenticated → unauthenticated', async () => {
-    fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValue([{ team: { _id: 'team-a' }, role: 'owner' } as never]);
-
-    let ctx: CoreStateContextValue | undefined;
-    render(
-      <CoreStateProvider>
-        <Consumer
-          captureCtx={next => {
-            ctx = next;
-          }}
-        />
-      </CoreStateProvider>
-    );
-
-    await waitFor(() => expect(screen.getByTestId('teams').textContent).toBe('team-a'));
-
-    fetchSnapshot.mockResolvedValue(
-      makeSnapshot({ userId: null, sessionToken: null, isAuthenticated: false })
-    );
-    await act(async () => {
-      await ctx!.refresh();
-    });
-
-    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('none'));
-    expect(screen.getByTestId('teams').textContent).toBe('');
-  });
-
-  it('preserves teams cache when identity is unchanged across refreshes', async () => {
-    fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValueOnce([
-      { team: { _id: 'team-x' }, role: 'owner' } as never,
-      { team: { _id: 'team-y' }, role: 'member' } as never,
-    ]);
-
-    let ctx: CoreStateContextValue | undefined;
-    render(
-      <CoreStateProvider>
-        <Consumer
-          captureCtx={next => {
-            ctx = next;
-          }}
-        />
-      </CoreStateProvider>
-    );
-
-    await waitFor(() => expect(screen.getByTestId('teams').textContent).toBe('team-x,team-y'));
-
-    // Subsequent refresh returns same identity — team cache must be preserved
-    // because refreshTeams is not re-issued by normal refresh.
-    await act(async () => {
-      await ctx!.refresh();
-    });
-
-    expect(screen.getByTestId('teams').textContent).toBe('team-x,team-y');
-    expect(listTeams).toHaveBeenCalledTimes(1);
-  });
-
   it('sets isReady=true once the first snapshot resolves', async () => {
     fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: null, sessionToken: null }));
-    listTeams.mockResolvedValue([]);
 
     render(
       <CoreStateProvider>
@@ -234,7 +114,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
       resolveSnapshot = resolve;
     });
     fetchSnapshot.mockReturnValue(pendingSnapshot);
-    listTeams.mockResolvedValue([]);
 
     const { unmount } = render(
       <CoreStateProvider>
@@ -285,7 +164,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
         currentUser: null,
       })
     );
-    listTeams.mockResolvedValue([]);
 
     let ctx: CoreStateContextValue | undefined;
     render(
@@ -306,7 +184,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
 
   it('ignores malformed session-token-updated events (#1937)', async () => {
     fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: null, sessionToken: null }));
-    listTeams.mockResolvedValue([]);
 
     render(
       <CoreStateProvider>
@@ -331,7 +208,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
   it('ignores expired JWT-shaped session-token-updated events (#1937)', async () => {
     const expiredToken = makeJwt({ exp: Math.floor(Date.now() / 1000) - 60 });
     fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: null, sessionToken: null }));
-    listTeams.mockResolvedValue([]);
 
     render(
       <CoreStateProvider>
@@ -360,7 +236,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
       .mockResolvedValueOnce(
         makeSnapshot({ userId: null, sessionToken: token, isAuthenticated: true })
       );
-    listTeams.mockResolvedValue([]);
 
     render(
       <CoreStateProvider>
@@ -381,7 +256,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
 
   it('setMeetAutoOrchestratorHandoff(true) calls update RPC + flips snapshot optimistically (#1299)', async () => {
     fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValue([]);
     vi.mocked(tauriCommands.openhumanUpdateMeetSettings).mockReset();
     vi.mocked(tauriCommands.openhumanUpdateMeetSettings).mockResolvedValue({
       result: { config: {}, workspace_dir: '/tmp', config_path: '/tmp/cfg.toml' },
@@ -413,7 +287,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
 
   it('dispatching core-rpc-auth-expired triggers clearSession (and debounces repeated fires within 10s)', async () => {
     fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValue([]);
     vi.mocked(tauriCommands.logout).mockReset();
     vi.mocked(tauriCommands.logout).mockResolvedValue(undefined as never);
 
@@ -429,7 +302,7 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent('core-rpc-auth-expired', {
-          detail: { method: 'openhuman.team_get_usage', source: 'rpc' },
+          detail: { method: 'openhuman.threads_list', source: 'rpc' },
         })
       );
     });
@@ -445,7 +318,7 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
       );
       window.dispatchEvent(
         new CustomEvent('core-rpc-auth-expired', {
-          detail: { method: 'openhuman.billing_get_current_plan', source: 'rpc' },
+          detail: { method: 'openhuman.app_state_snapshot', source: 'rpc' },
         })
       );
     });
@@ -455,7 +328,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
 
   it('ignores forged session-token-updated events that do not match the core snapshot (#1937)', async () => {
     fetchSnapshot.mockResolvedValue(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValue([]);
 
     render(
       <CoreStateProvider>
@@ -483,7 +355,6 @@ describe('CoreStateProvider — identity-change cache clearing', () => {
 
   it('setMeetAutoOrchestratorHandoff swallows refresh errors after the RPC succeeds (#1299)', async () => {
     fetchSnapshot.mockResolvedValueOnce(makeSnapshot({ userId: 'u1', sessionToken: 'tok1' }));
-    listTeams.mockResolvedValue([]);
     vi.mocked(tauriCommands.openhumanUpdateMeetSettings).mockReset();
     vi.mocked(tauriCommands.openhumanUpdateMeetSettings).mockResolvedValue({
       result: { config: {}, workspace_dir: '/tmp', config_path: '/tmp/cfg.toml' },

@@ -1,15 +1,12 @@
 //! `openhuman.connectivity_diag` RPC.
 //!
-//! Returns a snapshot of the local sidecar's process id + RPC port + backend
-//! Socket.IO state, so the frontend's coreHealthMonitor can prove "the local
-//! core is alive" without conflating that signal with the backend websocket
-//! or the browser's internet connectivity. See issue #1527.
+//! Returns a snapshot of the local core process id and RPC port so the
+//! frontend's coreHealthMonitor can prove "the local core is alive".
 
 use serde::Serialize;
 use serde_json::json;
 use tracing::{debug, warn};
 
-use crate::openhuman::socket::manager::global_socket_manager;
 use crate::rpc::RpcOutcome;
 
 use super::ops::is_port_in_use;
@@ -20,13 +17,11 @@ use super::ops::is_port_in_use;
 /// and so the frontend can map straight into typed Redux state.
 #[derive(Debug, Clone, Serialize)]
 pub struct ConnectivityDiagResponse {
-    /// Backend Socket.IO state, lowercased (e.g. `"connected"`,
-    /// `"disconnected"`, `"connecting"`, `"reconnecting"`, `"error"`). When
-    /// the SocketManager has not been bootstrapped yet (test runs, early
-    /// startup) we report `"uninitialized"`.
+    /// Legacy backend socket state retained for frontend compatibility. The
+    /// product-backend Socket.IO client has been removed, so this is always
+    /// `"removed"`.
     pub socket_state: String,
-    /// Last user-visible socket error surfaced via `SocketManager`'s
-    /// `SharedState.error` slot. `None` when no error pending.
+    /// Legacy backend socket error slot. Always `None`.
     pub last_ws_error: Option<String>,
     /// Sidecar process id — i.e. the PID of *this* core binary handling the
     /// RPC. The frontend matches this against the PID it started so it can
@@ -72,25 +67,8 @@ fn resolve_listen_port() -> u16 {
     7788
 }
 
-/// Snapshot the backend socket state. Returns `("uninitialized", None)`
-/// when the SocketManager singleton hasn't been registered yet — typical
-/// during early startup or in unit tests.
 fn snapshot_socket_state() -> (String, Option<String>) {
-    match global_socket_manager() {
-        Some(mgr) => {
-            let state = mgr.get_state();
-            // ConnectionStatus serializes lowercase via the enum's serde
-            // attribute, but `Debug` formats the variant name PascalCase.
-            // Funnel through serde_json so the on-the-wire shape stays
-            // stable even if Debug formatting changes upstream.
-            let status_value = serde_json::to_value(state.status)
-                .ok()
-                .and_then(|v| v.as_str().map(String::from))
-                .unwrap_or_else(|| "unknown".to_string());
-            (status_value, state.error)
-        }
-        None => ("uninitialized".to_string(), None),
-    }
+    ("removed".to_string(), None)
 }
 
 /// Build a `ConnectivityDiagResponse` for the live process. Pure-ish: only
@@ -141,18 +119,8 @@ mod tests {
 
     #[test]
     fn snapshot_socket_state_is_uninitialized_without_manager() {
-        // The global SocketManager OnceLock may already be set if other
-        // tests in this binary installed it. Skip in that case rather than
-        // fail; we already cover the live path implicitly.
-        if global_socket_manager().is_some() {
-            eprintln!(
-                "[connectivity::rpc tests] global socket manager installed — \
-                 skipping uninitialized-state assertion"
-            );
-            return;
-        }
         let (state, err) = snapshot_socket_state();
-        assert_eq!(state, "uninitialized");
+        assert_eq!(state, "removed");
         assert!(err.is_none());
     }
 

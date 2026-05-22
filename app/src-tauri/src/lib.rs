@@ -526,9 +526,8 @@ async fn restart_app(app: tauri::AppHandle<AppRuntime>) -> Result<(), String> {
 /// per-user CEF profile dir, so on every restart-driven user flip the new
 /// process read whatever value the new profile's `localStorage` happened to
 /// hold from a prior session — usually stale, triggering a false re-flip and
-/// a restart loop. The Rust core writes `active_user.toml` atomically as part
-/// of `auth_store_session`, so it's the only profile-independent source of
-/// truth available to the UI at boot. Reuses
+/// a restart loop. The Rust core writes `active_user.toml` atomically, so
+/// it's the only profile-independent source of truth available to the UI at boot. Reuses
 /// `cef_profile::default_root_openhuman_dir()` so the lookup honors
 /// `OPENHUMAN_WORKSPACE` overrides used in test harnesses. (#900)
 #[tauri::command]
@@ -3480,8 +3479,8 @@ mod tests {
         // Real upstream failures (e.g. backend API errors surfaced via the
         // same `Failed to request …` wording elsewhere) must NOT be filtered —
         // they're the high-signal events Sentry exists for.
-        let msg = "Failed to request https://api.openhuman.ai/v1/skills: \
-                   error sending request for url (https://api.openhuman.ai/v1/skills)";
+        let msg = "Failed to request https://api.example.test/v1/skills: \
+                   error sending request for url (https://api.example.test/v1/skills)";
         assert!(
             !message_is_localhost_dev_fetch_noise(msg),
             "production API errors must NOT be filtered out"

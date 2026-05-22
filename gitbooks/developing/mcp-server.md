@@ -45,7 +45,7 @@ session:
 | RPC method | Purpose |
 | --- | --- |
 | `openhuman.tool_registry_list` | List MCP stdio tools and controller-backed tools with stable `tool_id`, route, version, input/output schemas, allowed agents, tags, enabled state, and health. |
-| `openhuman.tool_registry_get` | Return one registry entry by `tool_id`, for example `memory.search` or `tools.web_search`. |
+| `openhuman.tool_registry_get` | Return one registry entry by `tool_id`, for example `memory.search` or `cron.list`. |
 
 The registry is discovery-only. It does not change tool dispatch or permission
 checks; MCP calls still go through `tools/call`, and controller-backed tools

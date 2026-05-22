@@ -3,10 +3,7 @@ use axum::response::{IntoResponse, Response};
 use base64::Engine as _;
 use rand::RngExt as _;
 
-use crate::openhuman::config;
-use crate::openhuman::credentials::session_support;
 use crate::openhuman::http_host::types::HostedDirAuth;
-use crate::openhuman::http_host::LOG_PREFIX;
 
 pub(crate) fn ensure_authorized(headers: &HeaderMap, auth: &HostedDirAuth) -> Result<(), Response> {
     if !auth.enabled {
@@ -53,26 +50,7 @@ fn unauthorized_response() -> Response {
 }
 
 pub(crate) async fn resolve_default_auth_username() -> Option<String> {
-    let config = match config::load_config_with_timeout().await {
-        Ok(config) => config,
-        Err(error) => {
-            log::debug!("{LOG_PREFIX} default auth username config load failed: {error}");
-            return fallback_env_username();
-        }
-    };
-
-    match session_support::build_session_state(&config) {
-        Ok(state) => state
-            .user
-            .as_ref()
-            .and_then(resolve_default_auth_username_from_user_value)
-            .or(state.user_id)
-            .and_then(|value| sanitize_basic_auth_username(Some(value))),
-        Err(error) => {
-            log::debug!("{LOG_PREFIX} session state lookup failed for auth username: {error}");
-            fallback_env_username()
-        }
-    }
+    fallback_env_username()
 }
 
 fn fallback_env_username() -> Option<String> {

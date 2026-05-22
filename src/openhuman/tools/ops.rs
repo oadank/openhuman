@@ -302,20 +302,8 @@ pub fn all_tools_with_runtime(
         tracing::debug!("[mcp_client] no MCP servers registered — bridge tools skipped");
     }
 
-    // Web search — always registered. Result/timeout budget
-    // knobs still come from `config.web_search`, but there is no
-    // enable flag: every session needs research as a baseline
-    // capability.
-    tools.push(Box::new(WebSearchTool::new(
-        crate::openhuman::integrations::build_client(root_config),
-        root_config.web_search.max_results,
-        root_config.web_search.timeout_secs,
-    )));
-
     // Seltz — direct-API web search, gated on `seltz.enabled` (auto-set
-    // when `SELTZ_API_KEY` env var is present). Unlike the backend-proxied
-    // web_search above, this calls the Seltz API directly with a user-
-    // provided API key.
+    // when `SELTZ_API_KEY` env var is present).
     if root_config.seltz.enabled {
         tools.push(Box::new(
             crate::openhuman::integrations::SeltzSearchTool::new(
@@ -390,104 +378,15 @@ pub fn all_tools_with_runtime(
         )));
     }
 
-    // ── Agent integration tools (backend-proxied) ─────────────────
-    if let Some(client) = crate::openhuman::integrations::build_client(root_config) {
-        tracing::debug!("[integrations] client built successfully");
-        if root_config.integrations.apify.enabled {
-            tools.push(Box::new(
-                crate::openhuman::integrations::ApifyRunActorTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ApifyGetRunStatusTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ApifyGetRunResultsTool::new(Arc::clone(&client)),
-            ));
-            tracing::debug!("[integrations] registered apify tools");
-        } else {
-            tracing::debug!("[integrations] apify disabled — skipping");
-        }
-        if root_config.integrations.google_places.enabled {
-            tools.push(Box::new(
-                crate::openhuman::integrations::GooglePlacesSearchTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::GooglePlacesDetailsTool::new(Arc::clone(&client)),
-            ));
-            tracing::debug!("[integrations] registered google_places tools");
-        } else {
-            tracing::debug!("[integrations] google_places disabled — skipping");
-        }
-        if root_config.integrations.parallel.enabled {
-            tools.push(Box::new(
-                crate::openhuman::integrations::ParallelSearchTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ParallelExtractTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ParallelChatTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ParallelResearchTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ParallelEnrichTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::ParallelDatasetTool::new(Arc::clone(&client)),
-            ));
-            tracing::debug!("[integrations] registered parallel tools");
-        } else {
-            tracing::debug!("[integrations] parallel disabled — skipping");
-        }
-        if root_config.integrations.stock_prices.enabled {
-            tools.push(Box::new(
-                crate::openhuman::integrations::StockQuoteTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::StockExchangeRateTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::StockOptionsTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::StockCryptoSeriesTool::new(Arc::clone(&client)),
-            ));
-            tools.push(Box::new(
-                crate::openhuman::integrations::StockCommodityTool::new(Arc::clone(&client)),
-            ));
-            tracing::debug!("[integrations] registered stock_prices tools");
-        } else {
-            tracing::debug!("[integrations] stock_prices disabled — skipping");
-        }
-        if root_config.integrations.twilio.enabled {
-            tools.push(Box::new(
-                crate::openhuman::integrations::TwilioCallTool::new(Arc::clone(&client)),
-            ));
-            tracing::debug!("[integrations] registered twilio tools");
-        } else {
-            tracing::debug!("[integrations] twilio disabled — skipping");
-        }
-
-        // Composio — backend-proxied 1000+ OAuth integrations. Registers
-        // five agent tools (list_toolkits, list_connections, authorize,
-        // list_tools, execute) when the composio toggle is on. See
-        // `src/openhuman/composio/tools.rs` for per-tool details.
-        let composio_tools = crate::openhuman::composio::all_composio_agent_tools(root_config);
-        if !composio_tools.is_empty() {
-            tracing::debug!(
-                count = composio_tools.len(),
-                "[integrations] registered composio tools"
-            );
-            tools.extend(composio_tools);
-        } else {
-            tracing::debug!("[integrations] composio disabled — skipping");
-        }
-    } else {
+    let composio_tools = crate::openhuman::composio::all_composio_agent_tools(root_config);
+    if !composio_tools.is_empty() {
         tracing::debug!(
-            "[integrations] build_client returned None — integration tools not registered"
+            count = composio_tools.len(),
+            "[integrations] registered composio tools"
         );
+        tools.extend(composio_tools);
+    } else {
+        tracing::debug!("[integrations] composio tools unavailable — skipping");
     }
 
     // Coding-harness `lsp` tool (issue #1205) — capability-gated by the
@@ -505,7 +404,3 @@ pub fn all_tools_with_runtime(
 
     tools
 }
-
-#[cfg(test)]
-#[path = "ops_tests.rs"]
-mod tests;

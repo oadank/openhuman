@@ -587,7 +587,7 @@ describe('ChatRuntimeProvider — dedupe, proactive resolution, mid-turn invaria
           thread_id: 't-err-sanitized',
           request_id: 'r1',
           message:
-            'agent job failed: error sending request for url (https://staging-api.alphahuman.xyz/openai/v1/chat/completions)',
+            'agent job failed: error sending request for url (https://api.example.test/openai/v1/chat/completions)',
           error_type: 'inference',
           round: 0,
         });
@@ -613,7 +613,7 @@ describe('ChatRuntimeProvider — dedupe, proactive resolution, mid-turn invaria
       expect(threadApi.appendMessage).not.toHaveBeenCalledWith(
         't-err-sanitized',
         expect.objectContaining({
-          content: expect.stringContaining('https://staging-api.alphahuman.xyz'),
+          content: expect.stringContaining('https://api.example.test'),
         })
       );
     });

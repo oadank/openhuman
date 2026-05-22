@@ -52,7 +52,7 @@ export async function waitForApp(): Promise<void> {
  *
  * Why this is necessary: the picker is a fixed-position modal that
  * intercepts every click in the WebView. Without dismissing it, every
- * mega-flow sub-test would deep-link an app the user can't actually
+ * deep-link test would target an app the user can't actually
  * interact with, no `/consume` request would ever fire, and the first
  * `waitForMockRequest` would time out.
  *

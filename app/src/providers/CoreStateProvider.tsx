@@ -18,13 +18,7 @@ import {
   setCoreStateSnapshot,
 } from '../lib/coreState/store';
 import { syncAnalyticsConsent } from '../services/analytics';
-import {
-  fetchCoreAppSnapshot,
-  getTeamInvites,
-  getTeamMembers,
-  listTeams,
-  updateCoreLocalState,
-} from '../services/coreStateApi';
+import { fetchCoreAppSnapshot, updateCoreLocalState } from '../services/coreStateApi';
 import { socketService } from '../services/socketService';
 import { store } from '../store';
 import { resetUserScopedState } from '../store/resetActions';
@@ -35,7 +29,6 @@ import {
   openhumanUpdateMeetSettings,
   restartApp,
   setOnboardingCompleted,
-  storeSession,
   syncMemoryClientToken,
   logout as tauriLogout,
 } from '../utils/tauriCommands';
@@ -102,9 +95,6 @@ function isPlausibleSessionToken(token: unknown): token is string {
 
 interface CoreStateContextValue extends CoreState {
   refresh: () => Promise<void>;
-  refreshTeams: () => Promise<void>;
-  refreshTeamMembers: (teamId: string) => Promise<void>;
-  refreshTeamInvites: (teamId: string) => Promise<void>;
   setAnalyticsEnabled: (enabled: boolean) => Promise<void>;
   setMeetAutoOrchestratorHandoff: (enabled: boolean) => Promise<void>;
   setOnboardingCompletedFlag: (value: boolean) => Promise<void>;
@@ -123,7 +113,6 @@ interface CoreStateContextValue extends CoreState {
    */
   patchSnapshot: (patch: Partial<CoreAppSnapshot>) => void;
   setOnboardingTasks: (value: CoreOnboardingTasks | null) => Promise<void>;
-  storeSessionToken: (token: string, user?: object) => Promise<void>;
   clearSession: () => Promise<void>;
 }
 
@@ -210,7 +199,6 @@ function toSignedOutSnapshot(snapshot: CoreAppSnapshot): CoreAppSnapshot {
 export default function CoreStateProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CoreState>(() => getCoreStateSnapshot());
   const snapshotRequestIdRef = useRef(0);
-  const teamsRequestIdRef = useRef(0);
   const memoryTokenRef = useRef<string | null>(state.snapshot.sessionToken);
   const logoutGuardUntilRef = useRef(0);
   const bootstrapFailCountRef = useRef(0);
@@ -233,7 +221,6 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
     return () => {
       isMountedRef.current = false;
       snapshotRequestIdRef.current += 1;
-      teamsRequestIdRef.current += 1;
     };
   }, []);
 
@@ -271,16 +258,12 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
     //      user's third-party cookies.
     // This single rule covers every login path uniformly:
     //   - cold bootstrap on a fresh install (seed is null, nextId is real)
-    //   - direct `storeSessionToken` (Tauri OAuth)
     //   - deep-link `core-state:session-token-updated`
     //   - poll-detected flip (core-side user swap)
     //   - re-login as a different user after sign-out
     const seedUserId = getActiveUserId();
     const isFlip = Boolean(nextIdentity) && seedUserId !== nextIdentity;
     const isLogout = Boolean(previousAuthed) && !nextAuthed;
-    // Clear team caches whenever the visible identity changes (in-memory user
-    // shift) so the post-commit UI doesn't show user A's team list during the
-    // brief signed-out window or user B's session.
     const shouldClearScopedCaches = isFlip || isLogout || previousIdentity !== nextIdentity;
 
     commitState(previous => {
@@ -292,9 +275,6 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
         isBootstrapping: false,
         isReady: true,
         snapshot: nextSnapshot,
-        teams: shouldClearScopedCaches ? [] : previous.teams,
-        teamMembersById: shouldClearScopedCaches ? {} : previous.teamMembersById,
-        teamInvitesById: shouldClearScopedCaches ? {} : previous.teamInvitesById,
       };
     });
 
@@ -376,45 +356,6 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
     return promise;
   }, [refreshCore]);
 
-  const refreshTeams = useCallback(async () => {
-    const requestId = ++teamsRequestIdRef.current;
-    const identityAtStart = snapshotIdentity(getCoreStateSnapshot().snapshot);
-    const teams = await listTeams();
-    commitState(previous => {
-      if (requestId !== teamsRequestIdRef.current) {
-        return previous;
-      }
-
-      if (snapshotIdentity(previous.snapshot) !== identityAtStart) {
-        return previous;
-      }
-
-      return { ...previous, teams };
-    });
-  }, [commitState]);
-
-  const refreshTeamMembers = useCallback(
-    async (teamId: string) => {
-      const members = await getTeamMembers(teamId);
-      commitState(previous => ({
-        ...previous,
-        teamMembersById: { ...previous.teamMembersById, [teamId]: members },
-      }));
-    },
-    [commitState]
-  );
-
-  const refreshTeamInvites = useCallback(
-    async (teamId: string) => {
-      const invites = await getTeamInvites(teamId);
-      commitState(previous => ({
-        ...previous,
-        teamInvitesById: { ...previous.teamInvitesById, [teamId]: invites },
-      }));
-    },
-    [commitState]
-  );
-
   useEffect(() => {
     let cancelled = false;
     const doRefresh = async () => {
@@ -449,14 +390,6 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
 
     const load = async () => {
       await doRefresh();
-      if (!cancelled) {
-        const next = getCoreStateSnapshot();
-        if (next.snapshot.auth.isAuthenticated) {
-          await refreshTeams().catch(err => {
-            log('refreshTeams failed during bootstrap: %O', sanitizeError(err));
-          });
-        }
-      }
     };
 
     void load();
@@ -477,7 +410,7 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
         window.clearTimeout(timeoutId);
       }
     };
-  }, [commitState, refresh, refreshTeams]);
+  }, [commitState, refresh]);
 
   useEffect(() => {
     const onSessionTokenUpdated = (event: Event) => {
@@ -564,30 +497,6 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
     [refresh]
   );
 
-  const storeSessionToken = useCallback(
-    async (token: string, user?: object) => {
-      logoutGuardUntilRef.current = 0;
-      await storeSession(token, user ?? {});
-      try {
-        await syncMemoryClientToken(token);
-        memoryTokenRef.current = token;
-      } catch (error) {
-        console.warn('[core-state] memory client sync failed after session store:', error);
-      }
-      // refresh() drives refreshCore, which now owns identity-flip detection
-      // and dispatches handleIdentityFlip when both prev and next are
-      // authenticated and identities differ. The previous standalone
-      // restartApp call here was redundant and skipped the persist purge,
-      // letting redux-persist rehydrate the prior user's slices on launch
-      // (#900). Restart now happens inside handleIdentityFlip after purge.
-      await refresh();
-      await refreshTeams().catch(err => {
-        log('refreshTeams failed after session store: %O', sanitizeError(err));
-      });
-    },
-    [refresh, refreshTeams]
-  );
-
   const lastReauthAtRef = useRef(0);
 
   const clearSession = useCallback(async () => {
@@ -595,9 +504,6 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
     snapshotRequestIdRef.current += 1;
     commitState(previous => ({
       ...previous,
-      teams: [],
-      teamMembersById: {},
-      teamInvitesById: {},
       snapshot: toSignedOutSnapshot(previous.snapshot),
     }));
     memoryTokenRef.current = null;
@@ -624,9 +530,8 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
   //    them so `clearSession` only runs once.
   // 2. `openhuman:session-expired` — emitted by `socketService` when
   //    the core pushes `auth:session_expired` over Socket.IO (the
-  //    OpenHuman backend provider's `api_error` published
-  //    `DomainEvent::SessionExpired`, or `jsonrpc::invoke_method`
-  //    detected a 401 on a server-side method call). Without this, the
+  //    `jsonrpc::invoke_method` detected a 401 on a server-side method
+  //    call). Without this, the
   //    UI keeps showing a logged-in shell until the next refresh()
   //    discovers the missing token — confusing, and a security smell
   //    on shared devices.
@@ -684,30 +589,22 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
     () => ({
       ...state,
       refresh,
-      refreshTeams,
-      refreshTeamMembers,
-      refreshTeamInvites,
       patchSnapshot,
       setAnalyticsEnabled,
       setMeetAutoOrchestratorHandoff,
       setOnboardingCompletedFlag,
       setEncryptionKey: value => updateLocalState({ encryptionKey: value }),
       setOnboardingTasks: value => updateLocalState({ onboardingTasks: value }),
-      storeSessionToken,
       clearSession,
     }),
     [
       clearSession,
       refresh,
-      refreshTeamInvites,
-      refreshTeamMembers,
-      refreshTeams,
       patchSnapshot,
       setAnalyticsEnabled,
       setMeetAutoOrchestratorHandoff,
       setOnboardingCompletedFlag,
       state,
-      storeSessionToken,
       updateLocalState,
     ]
   );

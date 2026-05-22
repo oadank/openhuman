@@ -13,9 +13,9 @@
 #   docker compose -f e2e/docker-compose.yml run --rm e2e \
 #     bash -lc "pnpm install --frozen-lockfile && pnpm --filter openhuman-app test:e2e:build"
 #
-#   # Then run a spec (smoke / mega-flow / etc):
+#   # Then run a spec (smoke / navigation / etc):
 #   docker compose -f e2e/docker-compose.yml run --rm e2e \
-#     bash -lc "bash app/scripts/e2e-run-session.sh test/e2e/specs/mega-flow.spec.ts mega-flow"
+#     bash -lc "bash app/scripts/e2e-run-session.sh test/e2e/specs/navigation.spec.ts navigation"
 #
 #   # Or run the full suite:
 #   docker compose -f e2e/docker-compose.yml run --rm e2e \

@@ -151,14 +151,8 @@ pub(crate) async fn collect_calendar_meetings(
     config: &Config,
     now: DateTime<Utc>,
 ) -> Vec<PendingEvent> {
-    // Route through the mode-aware factory so the heartbeat planner
-    // sees the user's *own* Google Calendar connection in direct mode
-    // — not the tinyhumans backend tenant's (#1710). Pre-fix, the
-    // collector hard-bound to `build_composio_client` (backend-only)
-    // and silently returned an empty meeting list for direct-mode
-    // users.
-    let kind = match create_composio_client(config) {
-        Ok(kind) => kind,
+    let direct = match create_composio_client(config) {
+        Ok(ComposioClientKind::Direct(direct)) => direct,
         Err(error) => {
             tracing::debug!(
                 error = %error,
@@ -172,39 +166,21 @@ pub(crate) async fn collect_calendar_meetings(
         "[heartbeat:planner] composio client resolved for calendar collection"
     );
 
-    let connections = match &kind {
-        ComposioClientKind::Backend(client) => match client.list_connections().await {
-            Ok(resp) => {
-                tracing::debug!(
-                    count = resp.connections.len(),
-                    "[heartbeat:planner] composio list_connections (backend) fetched"
-                );
-                resp.connections
-            }
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "[heartbeat:planner] composio list_connections (backend) failed"
-                );
-                return Vec::new();
-            }
-        },
-        ComposioClientKind::Direct(direct) => match direct_list_connections(direct).await {
-            Ok(resp) => {
-                tracing::debug!(
-                    count = resp.connections.len(),
-                    "[heartbeat:planner] composio list_connections (direct) fetched"
-                );
-                resp.connections
-            }
-            Err(error) => {
-                tracing::warn!(
-                    error = %error,
-                    "[heartbeat:planner] composio list_connections (direct) failed"
-                );
-                return Vec::new();
-            }
-        },
+    let connections = match direct_list_connections(&direct).await {
+        Ok(resp) => {
+            tracing::debug!(
+                count = resp.connections.len(),
+                "[heartbeat:planner] composio list_connections fetched"
+            );
+            resp.connections
+        }
+        Err(error) => {
+            tracing::warn!(
+                error = %error,
+                "[heartbeat:planner] composio list_connections failed"
+            );
+            return Vec::new();
+        }
     };
 
     let lookahead = Duration::minutes(i64::from(config.heartbeat.meeting_lookahead_minutes.max(1)));
@@ -249,44 +225,23 @@ pub(crate) async fn collect_calendar_meetings(
                 &iana,
             );
 
-        let resp: ComposioExecuteResponse = match &kind {
-            ComposioClientKind::Backend(client) => {
-                match client
-                    .execute_tool("GOOGLECALENDAR_EVENTS_LIST", arguments)
-                    .await
-                {
-                    Ok(resp) => resp,
-                    Err(error) => {
-                        tracing::warn!(
-                            toolkit = %toolkit,
-                            connection_id = %conn.id,
-                            error = %error,
-                            "[heartbeat:planner] GOOGLECALENDAR_EVENTS_LIST (backend) failed"
-                        );
-                        continue;
-                    }
-                }
-            }
-            ComposioClientKind::Direct(direct) => {
-                match direct_execute(
-                    direct,
-                    "GOOGLECALENDAR_EVENTS_LIST",
-                    arguments,
-                    &config.composio.entity_id,
-                )
-                .await
-                {
-                    Ok(resp) => resp,
-                    Err(error) => {
-                        tracing::warn!(
-                            toolkit = %toolkit,
-                            connection_id = %conn.id,
-                            error = %error,
-                            "[heartbeat:planner] GOOGLECALENDAR_EVENTS_LIST (direct) failed"
-                        );
-                        continue;
-                    }
-                }
+        let resp: ComposioExecuteResponse = match direct_execute(
+            &direct,
+            "GOOGLECALENDAR_EVENTS_LIST",
+            arguments,
+            &config.composio.entity_id,
+        )
+        .await
+        {
+            Ok(resp) => resp,
+            Err(error) => {
+                tracing::warn!(
+                    toolkit = %toolkit,
+                    connection_id = %conn.id,
+                    error = %error,
+                    "[heartbeat:planner] GOOGLECALENDAR_EVENTS_LIST failed"
+                );
+                continue;
             }
         };
 

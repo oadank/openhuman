@@ -50,13 +50,10 @@ pub struct Config {
     /// the first launch of the new build.
     #[serde(default)]
     pub schema_version: u32,
-    pub api_url: Option<String>,
     pub api_key: Option<String>,
     /// Custom LLM inference endpoint (OpenAI-compatible). When set together
     /// with `api_key`, the inference provider talks directly to this URL
-    /// instead of routing through the OpenHuman backend. Account/auth/billing
-    /// calls always continue to use `api_url` — keeping inference and
-    /// product-backend concerns cleanly separated.
+    /// instead of using the configured provider endpoint.
     #[serde(default)]
     pub inference_url: Option<String>,
     pub default_model: Option<String>,
@@ -197,9 +194,7 @@ pub struct Config {
     //
     // Provider-string grammar (consumed by `providers::factory`):
     //
-    //   "cloud"                → resolves to `primary_cloud`; if primary is
-    //                            openhuman, behaves identically to "openhuman"
-    //   "openhuman"            → OpenHuman backend (api_url + api_key session JWT)
+    //   "cloud"                → resolves to `primary_cloud`.
     //   "openai:<model>"       → look up cloud_providers entry of type=openai;
     //                            build OpenAiCompatibleProvider with Bearer auth
     //   "anthropic:<model>"    → type=anthropic; Bearer auth on the compat endpoint
@@ -209,13 +204,12 @@ pub struct Config {
     //
     // Per-workload fields default to None, which the factory treats as "cloud".
     // Changing `primary_cloud` instantly re-routes every "cloud" workload.
-    /// Registered cloud providers. Index 0 is always the built-in OpenHuman
-    /// entry; additional entries are user-added third-party backends.
+    /// Registered cloud providers. Entries are user-owned API key providers.
     #[serde(default)]
     pub cloud_providers: Vec<crate::openhuman::config::schema::cloud_providers::CloudProviderCreds>,
 
     /// Id of the `cloud_providers` entry that "cloud" and "primary" resolve to.
-    /// When `None`, the factory falls back to the OpenHuman entry.
+    /// When `None`, the factory requires an explicit configured provider.
     #[serde(default)]
     pub primary_cloud: Option<String>,
 
@@ -487,21 +481,13 @@ impl Default for Config {
             crate::openhuman::config::default_root_openhuman_dir().unwrap_or_else(|_| {
                 let home = UserDirs::new()
                     .map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
-                let dir_name = if crate::api::config::is_staging_app_env(
-                    crate::api::config::app_env_from_env().as_deref(),
-                ) {
-                    ".openhuman-staging"
-                } else {
-                    ".openhuman"
-                };
-                home.join(dir_name)
+                home.join(".openhuman")
             });
 
         Self {
             workspace_dir: openhuman_dir.join("workspace"),
             config_path: openhuman_dir.join("config.toml"),
             schema_version: 0,
-            api_url: None,
             api_key: None,
             inference_url: None,
             default_model: Some(DEFAULT_MODEL.to_string()),

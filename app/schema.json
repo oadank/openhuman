@@ -220,38 +220,6 @@
       ]
     },
     {
-      "description": "Consume login handoff token and return session JWT.",
-      "function": "consume_login_token",
-      "inputs": [
-        {
-          "comment": "One-time login token.",
-          "name": "loginToken",
-          "required": true,
-          "ty": "String"
-        }
-      ],
-      "method": "openhuman.auth_consume_login_token",
-      "namespace": "auth",
-      "outputs": [
-        {
-          "comment": "Consumed login token result.",
-          "name": "result",
-          "required": true,
-          "ty": "Json"
-        }
-      ]
-    },
-    {
-      "description": "Read stored app session token.",
-      "function": "get_session_token",
-      "inputs": [],
-      "method": "openhuman.auth_get_session_token",
-      "namespace": "auth",
-      "outputs": [
-        { "comment": "Session token payload.", "name": "token", "required": true, "ty": "Json" }
-      ]
-    },
-    {
       "description": "Get current auth/session state.",
       "function": "get_state",
       "inputs": [],
@@ -420,35 +388,6 @@
       "outputs": [
         {
           "comment": "Stored provider profile summary.",
-          "name": "profile",
-          "required": true,
-          "ty": "Json"
-        }
-      ]
-    },
-    {
-      "description": "Store and validate app session JWT.",
-      "function": "store_session",
-      "inputs": [
-        { "comment": "Session JWT token.", "name": "token", "required": true, "ty": "String" },
-        {
-          "comment": "Optional user id hint.",
-          "name": "user_id",
-          "required": false,
-          "ty": { "Option": "Json" }
-        },
-        {
-          "comment": "Optional user payload.",
-          "name": "user",
-          "required": false,
-          "ty": { "Option": "Json" }
-        }
-      ],
-      "method": "openhuman.auth_store_session",
-      "namespace": "auth",
-      "outputs": [
-        {
-          "comment": "Stored auth profile summary.",
           "name": "profile",
           "required": true,
           "ty": "Json"

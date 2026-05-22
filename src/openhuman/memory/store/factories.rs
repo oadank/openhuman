@@ -14,8 +14,7 @@ use std::sync::Arc;
 
 use crate::openhuman::config::{EmbeddingRouteConfig, MemoryConfig, StorageProviderConfig};
 use crate::openhuman::embeddings::{
-    self, EmbeddingProvider, DEFAULT_CLOUD_EMBEDDING_DIMENSIONS, DEFAULT_CLOUD_EMBEDDING_MODEL,
-    DEFAULT_OLLAMA_DIMENSIONS, DEFAULT_OLLAMA_MODEL,
+    self, EmbeddingProvider, DEFAULT_OLLAMA_DIMENSIONS, DEFAULT_OLLAMA_MODEL,
 };
 use crate::openhuman::memory::store::agentmemory::AgentMemoryBackend;
 use crate::openhuman::memory::store::unified::UnifiedMemory;
@@ -60,7 +59,7 @@ fn report_ollama_health_gate_once(base_url: &str) -> bool {
     // credentials. Full URL stays in the message body for diagnostics.
     let host_tag = redact_ollama_host(base_url);
     let message = format!(
-        "ollama embeddings opted-in but daemon unreachable at {base_url}; falling back to cloud embeddings for this session"
+        "ollama embeddings configured but daemon unreachable at {base_url}"
     );
     // Call report_error_message directly to avoid a redundant format!("{:#}") round-trip
     // that report_error would perform on an already-formatted &str.
@@ -68,7 +67,7 @@ fn report_ollama_health_gate_once(base_url: &str) -> bool {
         &message,
         "memory",
         "ollama_health_gate",
-        &[("ollama_host", host_tag), ("fallback", "cloud")],
+        &[("ollama_host", host_tag)],
     );
     true
 }
@@ -89,17 +88,6 @@ fn reset_health_gate_for_test() {
 /// memory health-gate picks it up automatically.
 fn ollama_base_url_for_probe() -> String {
     crate::openhuman::inference::local::ollama_base_url()
-}
-
-/// Canonical `(provider, model, dimensions)` tuple used everywhere the
-/// health-gate falls back from Ollama → cloud. Centralised so both the async
-/// and sync gate sites agree if the cloud defaults ever change.
-fn cloud_embedding_fallback() -> (String, String, usize) {
-    (
-        "cloud".to_string(),
-        DEFAULT_CLOUD_EMBEDDING_MODEL.to_string(),
-        DEFAULT_CLOUD_EMBEDDING_DIMENSIONS,
-    )
 }
 
 /// Extracts a low-cardinality `host[:port]` tag from `base_url` for Sentry.
@@ -205,14 +193,9 @@ pub fn effective_embedding_settings(
 /// Async, health-checked variant of [`effective_embedding_settings`].
 ///
 /// If the intended provider is `"ollama"` but the daemon doesn't respond at
-/// `<base_url>/api/tags` within a short timeout, this falls back to the cloud
-/// embedder and logs a single warning. This avoids the failure mode behind
-/// OPENHUMAN-TAURI-B7: a user who's flipped `local_ai.usage.embeddings = true`
-/// in Settings but doesn't actually have Ollama running ends up firing one
-/// `ollama_embed` Sentry event per embed call (226+ events in a day with zero
-/// impacted users — pure noise that drowns out real signals). With this
-/// gate, embed calls never even reach `OllamaEmbedding` in that state; the
-/// cloud embedder serves the session and the user gets a working app.
+/// `<base_url>/api/tags` within a short timeout, this logs a single warning
+/// and still returns the configured provider. The eventual embed call then
+/// fails loudly instead of silently falling back to a removed cloud backend.
 ///
 /// The probe deliberately uses a 2s timeout — long enough to tolerate a
 /// briefly-busy daemon, short enough to not block startup if Ollama is
@@ -234,16 +217,11 @@ pub async fn effective_embedding_settings_probed(
         );
         return intended;
     }
-    // Ollama is configured but not reachable. Report once per process at this
-    // gate so a genuine misconfiguration still surfaces in Sentry — but no
-    // more than once, so re-instantiating memory across agents/sessions
-    // doesn't recreate the per-embed flood we're fixing. Then fall back to
-    // cloud so the user has a working app.
     log::warn!(
-        "[memory::factory] ollama unreachable at {base_url}; falling back to cloud embedder for this session"
+        "[memory::factory] ollama unreachable at {base_url}; embeddings will fail until local AI is reachable"
     );
     report_ollama_health_gate_once(&base_url);
-    cloud_embedding_fallback()
+    intended
 }
 
 /// Returns the effective name of the memory backend being used.
@@ -388,11 +366,9 @@ fn create_memory_full(
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
 
-    // 2. Health-gate: if the user has opted into Ollama embeddings but the
-    //    daemon isn't reachable, fall back to cloud for this session.
-    //    Prevents OPENHUMAN-TAURI-B7's 226-event Sentry flood: instead of
-    //    one Sentry event per embed attempt, we report once at the gate
-    //    (low cardinality, high signal) and serve the session from cloud.
+    // 2. Health-gate: if Ollama embeddings are selected but the daemon
+    //    isn't reachable, fail loudly instead of falling back to the
+    //    removed cloud embedder.
     let gate_triggered;
     let (provider, model, dims) = if intended.0 == "ollama" {
         let base_url = ollama_base_url_for_probe();
@@ -406,11 +382,13 @@ fn create_memory_full(
             intended
         } else {
             log::warn!(
-                "[memory::factory] ollama unreachable at {base_url}; falling back to cloud embedder for this session"
+                "[memory::factory] ollama unreachable at {base_url}; embeddings unavailable"
             );
             report_ollama_health_gate_once(&base_url);
-            gate_triggered = true;
-            cloud_embedding_fallback()
+            anyhow::bail!(
+                "No embedding provider available: Ollama is configured for embeddings but \
+                 {base_url} is unreachable"
+            );
         }
     } else {
         gate_triggered = false;
@@ -649,9 +627,10 @@ mod tests {
 
     /// Sets `OPENHUMAN_OLLAMA_BASE_URL` to a deliberately unreachable address
     /// under the local-AI domain mutex, then verifies that the probed settings
-    /// fall back to cloud when the user has opted into local embeddings.
+    /// still return Ollama so the embed call fails loudly instead of falling
+    /// back to the removed cloud backend.
     #[tokio::test]
-    async fn probed_settings_fall_back_to_cloud_when_ollama_unreachable() {
+    async fn probed_settings_keep_ollama_when_ollama_unreachable() {
         let _env = EnvGuard::set("http://127.0.0.1:1");
         // Independent of suite ordering: an earlier fallback test must not
         // leave the latch tripped and silently turn this assertion green.
@@ -663,11 +642,11 @@ mod tests {
             effective_embedding_settings_probed(&mem, Some(local_embedding_for_test())).await;
 
         assert_eq!(
-            provider, "cloud",
-            "opted-in but unreachable Ollama must fall back to cloud"
+            provider, "ollama",
+            "opted-in but unreachable Ollama must remain selected"
         );
-        assert_eq!(model, DEFAULT_CLOUD_EMBEDDING_MODEL);
-        assert_eq!(dims, DEFAULT_CLOUD_EMBEDDING_DIMENSIONS);
+        assert_eq!(model, DEFAULT_OLLAMA_MODEL);
+        assert_eq!(dims, DEFAULT_OLLAMA_DIMENSIONS);
     }
 
     #[tokio::test]

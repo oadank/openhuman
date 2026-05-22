@@ -14,7 +14,6 @@ describe('tauriCommands', () => {
   const mockCallCoreRpc = callCoreRpc as Mock;
   let getAuthState: typeof import('../tauriCommands').getAuthState;
   let resetOpenHumanDataAndRestartCore: typeof import('../tauriCommands').resetOpenHumanDataAndRestartCore;
-  let storeSession: typeof import('../tauriCommands').storeSession;
   let openhumanLocalAiStatus: typeof import('../tauriCommands').openhumanLocalAiStatus;
   let openhumanServiceStatus: typeof import('../tauriCommands').openhumanServiceStatus;
   let prevInternals: TauriInternalsHolder['__TAURI_INTERNALS__'];
@@ -34,7 +33,6 @@ describe('tauriCommands', () => {
     const actual = await vi.importActual<typeof import('../tauriCommands')>('../tauriCommands');
     getAuthState = actual.getAuthState;
     resetOpenHumanDataAndRestartCore = actual.resetOpenHumanDataAndRestartCore;
-    storeSession = actual.storeSession;
     openhumanLocalAiStatus = actual.openhumanLocalAiStatus;
     openhumanServiceStatus = actual.openhumanServiceStatus;
   });
@@ -57,15 +55,6 @@ describe('tauriCommands', () => {
 
     expect(mockCallCoreRpc).toHaveBeenCalledWith({ method: 'openhuman.auth_get_state' });
     expect(response).toEqual({ is_authenticated: true, user: { id: 'u1' } });
-  });
-
-  test('storeSession calls expected RPC method and params', async () => {
-    await storeSession('jwt-token', { id: 'u1' });
-
-    expect(mockCallCoreRpc).toHaveBeenCalledWith({
-      method: 'openhuman.auth_store_session',
-      params: { token: 'jwt-token', user: { id: 'u1' } },
-    });
   });
 
   test('resetOpenHumanDataAndRestartCore invokes the destructive Tauri command', async () => {

@@ -12,14 +12,8 @@ run() {
   "$APP_DIR/scripts/e2e-run-spec.sh" "$1" "$2"
 }
 
-run "test/e2e/specs/login-flow.spec.ts" "login"
-run "test/e2e/specs/auth-access-control.spec.ts" "auth"
-run "test/e2e/specs/telegram-flow.spec.ts" "telegram"
-run "test/e2e/specs/gmail-flow.spec.ts" "gmail"
-run "test/e2e/specs/notion-flow.spec.ts" "notion"
 run "test/e2e/specs/card-payment-flow.spec.ts" "card-payment"
 run "test/e2e/specs/crypto-payment-flow.spec.ts" "crypto-payment"
-run "test/e2e/specs/conversations-web-channel-flow.spec.ts" "conversations"
 run "test/e2e/specs/local-model-runtime.spec.ts" "local-model"
 run "test/e2e/specs/screen-intelligence.spec.ts" "screen-intelligence"
 OPENHUMAN_SERVICE_MOCK=1 run "test/e2e/specs/service-connectivity-flow.spec.ts" "service-connectivity"

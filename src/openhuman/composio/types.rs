@@ -1,10 +1,8 @@
 //! Domain types for the Composio integration.
 //!
-//! These mirror the response envelopes emitted by the openhuman backend under
-//! `/agent-integrations/composio/*`. See:
-//!   - `src/routes/agentIntegrations/composio.ts`
-//!   - `src/controllers/agentIntegrations/composio/*.ts`
-//!     in the backend repo for the authoritative shapes.
+//! These are the local RPC/frontend envelopes used around direct Composio v3
+//! responses. The direct client reshapes upstream payloads into these structs
+//! so the rest of the app does not depend on raw provider response drift.
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -63,7 +61,7 @@ fn de_opt_string_or_object<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Str
 
 // ── Toolkits ────────────────────────────────────────────────────────
 
-/// Response body of `GET /agent-integrations/composio/toolkits`.
+/// Local response body for available toolkit slugs.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComposioToolkitsResponse {
     /// Server-enforced toolkit allowlist, e.g. `["gmail", "notion"]`.
@@ -136,14 +134,14 @@ impl ComposioConnection {
     }
 }
 
-/// Response body of `GET /agent-integrations/composio/connections`.
+/// Local response body for connected accounts.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComposioConnectionsResponse {
     #[serde(default)]
     pub connections: Vec<ComposioConnection>,
 }
 
-/// Response body of `POST /agent-integrations/composio/authorize`.
+/// Local response body for starting a Composio OAuth handoff.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioAuthorizeResponse {
     /// Composio-hosted OAuth URL the user opens in a browser.
@@ -154,7 +152,7 @@ pub struct ComposioAuthorizeResponse {
     pub connection_id: String,
 }
 
-/// Response body of `DELETE /agent-integrations/composio/connections/:id`.
+/// Local response body for deleting a Composio connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioDeleteResponse {
     #[serde(default)]
@@ -163,10 +161,10 @@ pub struct ComposioDeleteResponse {
 
 // ── Tools ───────────────────────────────────────────────────────────
 
-/// OpenAI function-calling schema returned by the backend for each tool.
+/// OpenAI function-calling schema for one Composio action.
 ///
-/// The backend wraps Composio's upstream shape; we keep the `type` +
-/// `function` envelope so callers can forward directly into an LLM.
+/// We keep the `type` + `function` envelope so callers can forward directly
+/// into an LLM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioToolSchema {
     #[serde(rename = "type", default = "default_function_type")]
@@ -190,7 +188,7 @@ pub struct ComposioToolFunction {
     pub parameters: Option<serde_json::Value>,
 }
 
-/// Response body of `GET /agent-integrations/composio/tools`.
+/// Local response body for Composio action schemas.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ComposioToolsResponse {
     #[serde(default)]
@@ -199,7 +197,7 @@ pub struct ComposioToolsResponse {
 
 // ── Execute ─────────────────────────────────────────────────────────
 
-/// Response body of `POST /agent-integrations/composio/execute`.
+/// Local response body for Composio action execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioExecuteResponse {
     /// Raw result from the upstream provider.
@@ -223,7 +221,7 @@ pub struct ComposioExecuteResponse {
 
 // ── GitHub repos + triggers ─────────────────────────────────────────
 
-/// One repository returned by `GET /agent-integrations/composio/github/repos`.
+/// One repository returned by native GitHub repository listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioGithubRepo {
     pub owner: String,
@@ -238,7 +236,7 @@ pub struct ComposioGithubRepo {
     pub html_url: Option<String>,
 }
 
-/// Response body of `GET /agent-integrations/composio/github/repos`.
+/// Local response body for native GitHub repository listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioGithubReposResponse {
     #[serde(rename = "connectionId")]
@@ -247,7 +245,7 @@ pub struct ComposioGithubReposResponse {
     pub repositories: Vec<ComposioGithubRepo>,
 }
 
-/// Response body of `POST /agent-integrations/composio/triggers`.
+/// Local response body for creating/upserting a trigger.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioCreateTriggerResponse {
     #[serde(rename = "triggerId")]
@@ -265,7 +263,7 @@ pub struct ComposioAvailableTriggerRepo {
     pub repo: String,
 }
 
-/// One entry in `GET /agent-integrations/composio/triggers/available`.
+/// One available trigger descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioAvailableTrigger {
     pub slug: String,
@@ -293,7 +291,7 @@ pub struct ComposioAvailableTriggersResponse {
     pub triggers: Vec<ComposioAvailableTrigger>,
 }
 
-/// One entry in `GET /agent-integrations/composio/triggers`.
+/// One active trigger descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioActiveTrigger {
     #[serde(deserialize_with = "de_string_or_object")]
@@ -324,7 +322,7 @@ pub struct ComposioActiveTriggersResponse {
     pub triggers: Vec<ComposioActiveTrigger>,
 }
 
-/// Response body of `POST /agent-integrations/composio/triggers` (enable).
+/// Local response body for enabling a trigger.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioEnableTriggerResponse {
     #[serde(rename = "triggerId")]
@@ -334,7 +332,7 @@ pub struct ComposioEnableTriggerResponse {
     pub connection_id: String,
 }
 
-/// Response body of `DELETE /agent-integrations/composio/triggers/:id`.
+/// Local response body for disabling a trigger.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComposioDisableTriggerResponse {
     #[serde(default)]

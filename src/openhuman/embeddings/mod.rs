@@ -2,16 +2,12 @@
 //!
 //! Converts text into numerical vectors for semantic search. Providers:
 //!
-//! - **Cloud** (default): Routes through the OpenHuman backend's
-//!   `POST /openai/v1/embeddings` (Voyage-backed). The recommended path —
-//!   works on a fresh install without requiring a local Ollama daemon.
-//! - **Ollama**: Local Ollama server. Opt-in for offline-only setups
+//! - **Ollama** (default): Local Ollama server. Offline-first path
 //!   (set `memory.embedding_provider = "ollama"` or enable
 //!   `local_ai.usage.embeddings`).
 //! - **OpenAI**: Cloud-based embeddings via the OpenAI API or compatible endpoints.
 //! - **Noop**: A fallback provider for keyword-only search.
 
-pub mod cloud;
 mod factory;
 pub mod noop;
 pub mod ollama;
@@ -19,9 +15,6 @@ pub mod openai;
 mod provider_trait;
 pub mod store;
 
-pub use cloud::{
-    OpenHumanCloudEmbedding, DEFAULT_CLOUD_EMBEDDING_DIMENSIONS, DEFAULT_CLOUD_EMBEDDING_MODEL,
-};
 pub use factory::{
     create_embedding_provider, default_embedding_provider, default_local_embedding_provider,
 };
@@ -140,25 +133,13 @@ mod tests {
             .contains("fastembed"));
     }
 
-    #[test]
-    fn factory_cloud() {
-        let p = create_embedding_provider(
-            "cloud",
-            DEFAULT_CLOUD_EMBEDDING_MODEL,
-            DEFAULT_CLOUD_EMBEDDING_DIMENSIONS,
-        )
-        .unwrap();
-        assert_eq!(p.name(), "cloud");
-        assert_eq!(p.dimensions(), DEFAULT_CLOUD_EMBEDDING_DIMENSIONS);
-    }
-
     // ── Default provider ─────────────────────────────────────
 
     #[test]
-    fn default_provider_uses_cloud() {
+    fn default_provider_uses_ollama() {
         let p = default_embedding_provider();
-        assert_eq!(p.name(), "cloud");
-        assert_eq!(p.dimensions(), DEFAULT_CLOUD_EMBEDDING_DIMENSIONS);
+        assert_eq!(p.name(), "ollama");
+        assert_eq!(p.dimensions(), DEFAULT_OLLAMA_DIMENSIONS);
     }
 
     #[test]

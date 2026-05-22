@@ -1,4 +1,4 @@
-//! HTTP JSON-RPC integration tests against a real axum stack and a mock upstream API.
+//! HTTP JSON-RPC integration tests against a real axum stack and mock provider endpoints.
 //!
 //! Isolates config under a temp `HOME` so auth profiles and the OpenHuman provider resolve
 //! the same state directory. Run with: `cargo test --test json_rpc_e2e`
@@ -57,9 +57,8 @@ impl Drop for EnvVarGuard {
     }
 }
 
-/// Serializes tests in this binary: `HOME` / `OPENHUMAN_WORKSPACE` / backend URL overrides are
-/// process-global, so parallel tests would clobber each other and hit the wrong `config.toml` or
-/// inherited `VITE_BACKEND_URL`.
+/// Serializes tests in this binary: `HOME` / `OPENHUMAN_WORKSPACE` overrides are
+/// process-global, so parallel tests would clobber each other and hit the wrong `config.toml`.
 static JSON_RPC_E2E_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static CHAT_COMPLETION_MODELS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 static CHAT_COMPLETION_REQUESTS: OnceLock<Mutex<Vec<Value>>> = OnceLock::new();
@@ -96,98 +95,6 @@ fn with_chat_completion_requests<T>(f: impl FnOnce(&mut Vec<Value>) -> T) -> T {
 }
 
 fn mock_upstream_router() -> Router {
-    const GENERAL_TOKEN: &str = "e2e-test-jwt";
-    const BILLING_TOKEN: &str = "e2e-billing-jwt";
-    const TEAM_TOKEN: &str = "e2e-team-jwt";
-
-    fn error_json(status: StatusCode, message: &str) -> (StatusCode, Json<Value>) {
-        (
-            status,
-            Json(json!({
-                "success": false,
-                "error": message,
-                "message": message,
-            })),
-        )
-    }
-
-    fn require_bearer(
-        headers: &HeaderMap,
-        expected_token: &str,
-    ) -> Result<(), (StatusCode, Json<Value>)> {
-        require_any_bearer(headers, &[expected_token])
-    }
-
-    fn require_any_bearer(
-        headers: &HeaderMap,
-        expected_tokens: &[&str],
-    ) -> Result<(), (StatusCode, Json<Value>)> {
-        let actual = headers
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .map(str::trim);
-        match actual {
-            Some(value)
-                if expected_tokens
-                    .iter()
-                    .any(|token| value == format!("Bearer {token}")) =>
-            {
-                Ok(())
-            }
-            Some(_) => Err(error_json(
-                StatusCode::UNAUTHORIZED,
-                "invalid Authorization bearer token",
-            )),
-            None => Err(error_json(
-                StatusCode::UNAUTHORIZED,
-                "missing Authorization bearer token",
-            )),
-        }
-    }
-
-    fn require_string_field<'a>(
-        body: &'a Value,
-        field: &str,
-    ) -> Result<&'a str, (StatusCode, Json<Value>)> {
-        body.get(field)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| {
-                error_json(
-                    StatusCode::BAD_REQUEST,
-                    &format!("missing or invalid '{field}'"),
-                )
-            })
-    }
-
-    fn require_positive_f64_field(
-        body: &Value,
-        field: &str,
-    ) -> Result<f64, (StatusCode, Json<Value>)> {
-        body.get(field)
-            .and_then(Value::as_f64)
-            .filter(|value| value.is_finite() && *value > 0.0)
-            .ok_or_else(|| {
-                error_json(
-                    StatusCode::BAD_REQUEST,
-                    &format!("missing or invalid '{field}'"),
-                )
-            })
-    }
-
-    // Matches authenticated profile fetches used during session validation.
-    async fn current_user(headers: HeaderMap) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_any_bearer(&headers, &[GENERAL_TOKEN, BILLING_TOKEN, TEAM_TOKEN])?;
-        Ok(Json(json!({
-            "success": true,
-            "data": {
-                "_id": "e2e-user-1",
-                "username": "e2e"
-            }
-        })))
-    }
-
     async fn chat_completions(
         uri: Uri,
         headers: HeaderMap,
@@ -285,241 +192,10 @@ fn mock_upstream_router() -> Router {
         }))
     }
 
-    // ── Billing mock routes ──────────────────────────────────────────────────
-
-    async fn stripe_current_plan(
-        headers: HeaderMap,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, BILLING_TOKEN)?;
-        Ok(Json(json!({
-            "success": true,
-            "data": {
-                "plan": "PRO",
-                "hasActiveSubscription": true,
-                "planExpiry": "2030-01-01T00:00:00.000Z",
-                "subscription": { "id": "sub_mock_123", "status": "active" }
-            }
-        })))
-    }
-
-    async fn stripe_purchase_plan(
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, BILLING_TOKEN)?;
-        let plan = require_string_field(&body, "plan")?;
-        if !matches!(plan, "basic" | "pro" | "BASIC" | "PRO") {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "missing or invalid 'plan'",
-            ));
-        }
-
-        let checkout_url = "http://127.0.0.1/mock-checkout";
-        let session_id = "cs_mock_abc";
-        if checkout_url.is_empty() || session_id.is_empty() {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "missing checkoutUrl or sessionId",
-            ));
-        }
-
-        Ok(Json(json!({
-            "success": true,
-            "data": { "checkoutUrl": checkout_url, "sessionId": session_id }
-        })))
-    }
-
-    async fn stripe_portal(headers: HeaderMap) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, BILLING_TOKEN)?;
-        let portal_url = "http://127.0.0.1/mock-portal";
-        if portal_url.is_empty() {
-            return Err(error_json(StatusCode::BAD_REQUEST, "missing portalUrl"));
-        }
-
-        Ok(Json(json!({
-            "success": true,
-            "data": { "portalUrl": portal_url }
-        })))
-    }
-
-    async fn credits_top_up(
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, BILLING_TOKEN)?;
-        let amount_usd = require_positive_f64_field(&body, "amountUsd")?;
-        let gateway = require_string_field(&body, "gateway")?;
-        if !matches!(gateway, "stripe" | "coinbase") {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "missing or invalid 'gateway'",
-            ));
-        }
-
-        Ok(Json(json!({
-            "success": true,
-            "data": {
-                "url": "http://127.0.0.1/mock-topup",
-                "gatewayTransactionId": "txn_mock_1",
-                "amountUsd": amount_usd,
-                "gateway": gateway
-            }
-        })))
-    }
-
-    async fn coinbase_charge(
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, BILLING_TOKEN)?;
-        let plan = require_string_field(&body, "plan")?;
-        let interval = body
-            .get("interval")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or("annual");
-        if !matches!(plan, "basic" | "pro" | "BASIC" | "PRO") {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "missing or invalid 'plan'",
-            ));
-        }
-        if interval != "annual" {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "missing or invalid 'interval'",
-            ));
-        }
-
-        Ok(Json(json!({
-            "success": true,
-            "data": {
-                "gatewayTransactionId": "coinbase_mock_1",
-                "hostedUrl": "http://127.0.0.1/mock-coinbase",
-                "status": "NEW",
-                "expiresAt": "2030-01-01T01:00:00.000Z"
-            }
-        })))
-    }
-
-    // ── Team mock routes ─────────────────────────────────────────────────────
-
-    async fn team_members(headers: HeaderMap) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, TEAM_TOKEN)?;
-        Ok(Json(json!({
-            "success": true,
-            "data": [
-                { "id": "user-1", "username": "alice", "role": "ADMIN" },
-                { "id": "user-2", "username": "bob",   "role": "MEMBER" }
-            ]
-        })))
-    }
-
-    async fn team_invites_get(
-        headers: HeaderMap,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, TEAM_TOKEN)?;
-        Ok(Json(json!({
-            "success": true,
-            "data": [
-                { "id": "inv-1", "code": "ALPHA1", "maxUses": 5, "usedCount": 1, "expiresAt": null }
-            ]
-        })))
-    }
-
-    async fn team_invites_post(
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, TEAM_TOKEN)?;
-
-        let max_uses = body
-            .get("maxUses")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| error_json(StatusCode::BAD_REQUEST, "missing or invalid 'maxUses'"))?;
-        let expires_in_days = body
-            .get("expiresInDays")
-            .and_then(Value::as_u64)
-            .ok_or_else(|| {
-                error_json(
-                    StatusCode::BAD_REQUEST,
-                    "missing or invalid 'expiresInDays'",
-                )
-            })?;
-        if max_uses == 0 || expires_in_days == 0 {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "invite payload values must be greater than zero",
-            ));
-        }
-
-        Ok(Json(json!({
-            "success": true,
-            "data": { "id": "inv-new", "code": "NEWCODE", "maxUses": max_uses, "usedCount": 0, "expiresAt": null }
-        })))
-    }
-
-    async fn team_member_delete(
-        headers: HeaderMap,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, TEAM_TOKEN)?;
-        Ok(Json(json!({ "success": true, "data": {} })))
-    }
-
-    async fn team_member_role_put(
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, TEAM_TOKEN)?;
-        let role = require_string_field(&body, "role")?;
-        if !matches!(role, "ADMIN" | "MEMBER" | "OWNER") {
-            return Err(error_json(
-                StatusCode::BAD_REQUEST,
-                "missing or invalid 'role'",
-            ));
-        }
-        Ok(Json(json!({ "success": true, "data": {} })))
-    }
-
-    async fn team_invite_delete(
-        headers: HeaderMap,
-    ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-        require_bearer(&headers, TEAM_TOKEN)?;
-        Ok(Json(json!({ "success": true, "data": {} })))
-    }
-
     Router::new()
-        .route("/settings", get(current_user))
-        .route("/auth/me", get(current_user))
         .route("/openai/v1/chat/completions", post(chat_completions))
         .route("/v1/chat/completions", post(generic_chat_completions))
         .route("/chat/completions", post(generic_chat_completions))
-        // billing
-        .route("/payments/stripe/currentPlan", get(stripe_current_plan))
-        .route("/payments/stripe/purchasePlan", post(stripe_purchase_plan))
-        .route("/payments/stripe/portal", post(stripe_portal))
-        .route("/payments/credits/top-up", post(credits_top_up))
-        .route("/payments/coinbase/charge", post(coinbase_charge))
-        // team
-        .route("/teams/{team_id}/members", get(team_members))
-        .route(
-            "/teams/{team_id}/members/{user_id}",
-            axum::routing::delete(team_member_delete),
-        )
-        .route(
-            "/teams/{team_id}/members/{user_id}/role",
-            axum::routing::put(team_member_role_put),
-        )
-        .route(
-            "/teams/{team_id}/invites",
-            get(team_invites_get).post(team_invites_post),
-        )
-        .route(
-            "/teams/{team_id}/invites/{invite_id}",
-            axum::routing::delete(team_invite_delete),
-        )
 }
 
 #[derive(Clone)]
@@ -818,10 +494,21 @@ fn write_min_config(openhuman_dir: &Path, api_origin: &str) {
     // contract is not modelled by the e2e mock, which closes the SSE stream
     // mid-response.
     let cfg = format!(
-        r#"api_url = "{api_origin}"
-default_model = "e2e-mock-model"
+        r#"default_model = "openai:e2e-mock-model"
 default_temperature = 0.7
 chat_onboarding_completed = true
+reasoning_provider = "openai:reasoning-v1"
+agentic_provider = "openai:agentic-v1"
+coding_provider = "openai:coding-v1"
+primary_cloud = "p_e2e_openai"
+
+[[cloud_providers]]
+id = "p_e2e_openai"
+slug = "openai"
+label = "OpenAI"
+endpoint = "{api_origin}"
+auth_style = "none"
+default_model = "e2e-mock-model"
 
 [secrets]
 encrypt = false
@@ -851,10 +538,21 @@ encrypt = false
 
 fn write_min_config_with_local_ai_disabled(openhuman_dir: &Path, api_origin: &str) {
     let cfg = format!(
-        r#"api_url = "{api_origin}"
-default_model = "e2e-mock-model"
+        r#"default_model = "openai:e2e-mock-model"
 default_temperature = 0.7
 chat_onboarding_completed = true
+reasoning_provider = "openai:reasoning-v1"
+agentic_provider = "openai:agentic-v1"
+coding_provider = "openai:coding-v1"
+primary_cloud = "p_e2e_openai"
+
+[[cloud_providers]]
+id = "p_e2e_openai"
+slug = "openai"
+label = "OpenAI"
+endpoint = "{api_origin}"
+auth_style = "none"
+default_model = "e2e-mock-model"
 
 [secrets]
 encrypt = false
@@ -925,46 +623,17 @@ async fn json_rpc_tool_registry_lists_and_gets_entries() {
     assert!(memory_search.get("input_schema").is_some());
     assert!(memory_search.get("output_schema").is_some());
 
-    let controller_tool = tools
-        .iter()
-        .find(|tool| tool.get("tool_id").and_then(Value::as_str) == Some("tools.web_search"))
-        .expect("registry should include tools.web_search");
-    assert_eq!(
-        controller_tool.get("transport").and_then(Value::as_str),
-        Some("json_rpc")
-    );
-    assert_eq!(
-        controller_tool
-            .get("route")
-            .and_then(|route| route.get("method"))
-            .and_then(Value::as_str),
-        Some("openhuman.tools_web_search")
-    );
-    assert_eq!(
-        controller_tool.get("health").and_then(Value::as_str),
-        Some("available")
-    );
-
     let get = post_json_rpc(
         &rpc_base,
         1848_2,
         "openhuman.tool_registry_get",
-        json!({ "tool_id": "tools.web_search" }),
+        json!({ "tool_id": "memory.search" }),
     )
     .await;
     let get_result = assert_no_jsonrpc_error(&get, "tool_registry_get");
     assert_eq!(
         get_result.get("tool_id").and_then(Value::as_str),
-        Some("tools.web_search")
-    );
-    assert_eq!(
-        get_result
-            .get("input_schema")
-            .and_then(|schema| schema.get("properties"))
-            .and_then(|properties| properties.get("query"))
-            .and_then(|query| query.get("type"))
-            .and_then(Value::as_str),
-        Some("string")
+        Some("memory.search")
     );
 
     let missing = post_json_rpc(
@@ -996,22 +665,11 @@ async fn json_rpc_protocol_auth_and_agent_hello() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    // Always use the in-process Axum mock for /settings + /openai so this test does not pick up
-    // BACKEND_URL/VITE_BACKEND_URL from the developer shell (e.g. mock-api that returns 401 for
-    // the synthetic JWT used below).
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
 
     write_min_config(&openhuman_home, &mock_origin);
-
-    // Pre-create the user-scoped config directory so that when store_session
-    // activates user "e2e-user" and reloads config, it finds the correct
-    // api_url and secrets.encrypt=false (rather than defaults).
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config(&user_scoped_dir, &mock_origin);
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{}", rpc_addr);
@@ -1038,19 +696,6 @@ async fn json_rpc_protocol_auth_and_agent_hello() {
         state_body.get("isAuthenticated").is_some() || state_body.get("is_authenticated").is_some(),
         "unexpected auth state shape: {state_body}"
     );
-
-    // --- auth: store session (validates JWT via mock GET /auth/me) ---
-    let store = post_json_rpc(
-        &rpc_base,
-        4,
-        "openhuman.auth_store_session",
-        json!({
-            "token": "e2e-test-jwt",
-            "user_id": "e2e-user"
-        }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
 
     // --- agent: single chat turn (mock chat completions) ---
     let chat = post_json_rpc(
@@ -1127,30 +772,13 @@ async fn json_rpc_prompt_injection_is_rejected_before_model_call() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_url_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-    let _api_url_guard = EnvVarGuard::unset("OPENHUMAN_API_URL");
 
     let (api_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let api_origin = format!("http://{api_addr}");
     write_min_config(openhuman_home.as_path(), &api_origin);
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config(&user_scoped_dir, &api_origin);
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{rpc_addr}");
-
-    let store = post_json_rpc(
-        &rpc_base,
-        4001,
-        "openhuman.auth_store_session",
-        json!({
-            "token": "e2e-test-jwt",
-            "user_id": "e2e-user"
-        }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
 
     with_chat_completion_models(|models| models.clear());
 
@@ -1220,9 +848,6 @@ async fn json_rpc_thread_labels_create_and_update() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_url_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-    let _api_url_guard = EnvVarGuard::unset("OPENHUMAN_API_URL");
 
     let (api_addr, api_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let api_origin = format!("http://{api_addr}");
@@ -1325,9 +950,6 @@ async fn json_rpc_thread_not_found_errors_are_structured() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_url_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-    let _api_url_guard = EnvVarGuard::unset("OPENHUMAN_API_URL");
 
     let (api_addr, api_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let api_origin = format!("http://{api_addr}");
@@ -1392,9 +1014,6 @@ async fn json_rpc_thread_generate_title_falls_back_when_provider_path_is_unavail
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_url_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-    let _api_url_guard = EnvVarGuard::unset("OPENHUMAN_API_URL");
 
     with_chat_completion_models(|models| models.clear());
     with_chat_completion_requests(|requests| requests.clear());
@@ -1500,9 +1119,6 @@ async fn json_rpc_thread_turn_state_lifecycle() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_url_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-    let _api_url_guard = EnvVarGuard::unset("OPENHUMAN_API_URL");
 
     let (api_addr, api_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let api_origin = format!("http://{api_addr}");
@@ -1636,8 +1252,6 @@ async fn json_rpc_memory_sync_and_learn() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let _embed_strict_guard = EnvVarGuard::set("OPENHUMAN_MEMORY_EMBED_STRICT", "false");
     let _embed_endpoint_guard = EnvVarGuard::set("OPENHUMAN_MEMORY_EMBED_ENDPOINT", "");
     let _embed_model_guard = EnvVarGuard::set("OPENHUMAN_MEMORY_EMBED_MODEL", "");
@@ -1759,8 +1373,6 @@ async fn json_rpc_memory_tree_end_to_end() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     // Phase 4 (#710): disable strict embedding so ingest falls back to the
     // Inert (zero-vector) embedder when no Ollama endpoint is reachable.
     // CI has no local Ollama; without this the `memory_tree_ingest` call
@@ -1933,7 +1545,7 @@ async fn json_rpc_memory_tree_end_to_end() {
 }
 
 #[tokio::test]
-async fn json_rpc_web_chat_routing_cases_use_expected_backend_models() {
+async fn json_rpc_web_chat_routing_cases_use_expected_direct_provider_models() {
     let _env_lock = json_rpc_e2e_env_lock();
     let tmp = tempdir().expect("tempdir");
     let home = tmp.path();
@@ -1941,31 +1553,15 @@ async fn json_rpc_web_chat_routing_cases_use_expected_backend_models() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
 
     write_min_config_with_local_ai_disabled(&openhuman_home, &mock_origin);
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config_with_local_ai_disabled(&user_scoped_dir, &mock_origin);
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{}", rpc_addr);
     tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let store = post_json_rpc(
-        &rpc_base,
-        1,
-        "openhuman.auth_store_session",
-        json!({
-            "token": "e2e-test-jwt",
-            "user_id": "e2e-user"
-        }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
 
     let routing_cases = [
         ("hint:reasoning", "reasoning-v1"),
@@ -2054,31 +1650,15 @@ async fn json_rpc_web_chat_custom_reasoning_provider_uses_stored_key_and_rebuild
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
 
     write_min_config_with_local_ai_disabled(&openhuman_home, &mock_origin);
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config_with_local_ai_disabled(&user_scoped_dir, &mock_origin);
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{}", rpc_addr);
     tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let store = post_json_rpc(
-        &rpc_base,
-        6001,
-        "openhuman.auth_store_session",
-        json!({
-            "token": "e2e-test-jwt",
-            "user_id": "e2e-user"
-        }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
 
     let update = post_json_rpc(
         &rpc_base,
@@ -2230,7 +1810,7 @@ async fn json_rpc_web_chat_custom_reasoning_provider_uses_stored_key_and_rebuild
         json!({
             "client_id": client_id,
             "thread_id": thread_id,
-            "message": "This turn should stay on the backend agentic route",
+            "message": "This turn should stay on the configured agentic route",
             "model_override": "hint:agentic"
         }),
     )
@@ -2258,8 +1838,8 @@ async fn json_rpc_web_chat_custom_reasoning_provider_uses_stored_key_and_rebuild
     assert_eq!(requests.len(), 3, "expected three outbound provider calls");
     assert_eq!(
         requests[2].get("path").and_then(Value::as_str),
-        Some("/openai/v1/chat/completions"),
-        "custom reasoning provider must not hijack unrelated backend routes"
+        Some("/chat/completions"),
+        "custom reasoning provider must not hijack unrelated configured routes"
     );
     assert_eq!(
         requests[2].get("model").and_then(Value::as_str),
@@ -2279,31 +1859,15 @@ async fn json_rpc_web_chat_custom_reasoning_provider_with_auth_none_omits_auth_h
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
 
     write_min_config_with_local_ai_disabled(&openhuman_home, &mock_origin);
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config_with_local_ai_disabled(&user_scoped_dir, &mock_origin);
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{}", rpc_addr);
     tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let store = post_json_rpc(
-        &rpc_base,
-        6101,
-        "openhuman.auth_store_session",
-        json!({
-            "token": "e2e-test-jwt",
-            "user_id": "e2e-user"
-        }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
 
     let update = post_json_rpc(
         &rpc_base,
@@ -2427,8 +1991,6 @@ async fn json_rpc_rejects_non_object_params_with_clear_error() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -2468,8 +2030,6 @@ async fn json_rpc_screen_intelligence_capture_test_returns_stable_shape() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -2550,8 +2110,6 @@ async fn json_rpc_screen_intelligence_status_returns_stable_shape() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -2644,8 +2202,6 @@ async fn json_rpc_app_state_snapshot_returns_runtime_shape() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -2729,8 +2285,6 @@ async fn json_rpc_app_state_update_local_state_round_trips_into_snapshot() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -2794,8 +2348,6 @@ async fn json_rpc_wallet_setup_round_trips_status() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -2901,8 +2453,6 @@ async fn json_rpc_wallet_execution_surface_round_trips() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let (wallet_rpc_addr, raw_txs) = start_mock_wallet_evm_rpc().await;
     let _evm_provider_guard = EnvVarGuard::set(
         "OPENHUMAN_WALLET_RPC_EVM",
@@ -3096,8 +2646,6 @@ async fn json_rpc_app_state_snapshot_chat_onboarding_defaults_false() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -3106,9 +2654,20 @@ async fn json_rpc_app_state_snapshot_chat_onboarding_defaults_false() {
     // of `false`. Cannot reuse `write_min_config` because it hard-codes the
     // flag to `true` so the e2e mock can bypass the welcome agent.
     let cfg = format!(
-        r#"api_url = "{mock_origin}"
-default_model = "e2e-mock-model"
+        r#"default_model = "openai:e2e-mock-model"
 default_temperature = 0.7
+reasoning_provider = "openai:reasoning-v1"
+agentic_provider = "openai:agentic-v1"
+coding_provider = "openai:coding-v1"
+primary_cloud = "p_e2e_openai"
+
+[[cloud_providers]]
+id = "p_e2e_openai"
+slug = "openai"
+label = "OpenAI"
+endpoint = "{mock_origin}"
+auth_style = "none"
+default_model = "e2e-mock-model"
 
 [secrets]
 encrypt = false
@@ -3153,8 +2712,6 @@ async fn json_rpc_screen_intelligence_vision_recent_returns_empty_without_sessio
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -3198,8 +2755,6 @@ async fn json_rpc_autocomplete_runtime_settings_and_logs_flow() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -3432,8 +2987,6 @@ async fn json_rpc_local_ai_device_profile_and_presets() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let _tier_guard = EnvVarGuard::unset("OPENHUMAN_LOCAL_AI_TIER");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
@@ -3573,8 +3126,6 @@ async fn json_rpc_local_ai_lm_studio_config_diagnostics_and_prompt() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let _tier_guard = EnvVarGuard::unset("OPENHUMAN_LOCAL_AI_TIER");
     let _lm_env_guard = EnvVarGuard::unset("OPENHUMAN_LM_STUDIO_BASE_URL");
     let _lm_alias_env_guard = EnvVarGuard::unset("LM_STUDIO_BASE_URL");
@@ -3725,8 +3276,6 @@ async fn json_rpc_inference_namespace_lm_studio_prompt_and_status() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let _tier_guard = EnvVarGuard::unset("OPENHUMAN_LOCAL_AI_TIER");
     let _lm_env_guard = EnvVarGuard::unset("OPENHUMAN_LM_STUDIO_BASE_URL");
     let _lm_alias_env_guard = EnvVarGuard::unset("LM_STUDIO_BASE_URL");
@@ -3895,8 +3444,6 @@ async fn json_rpc_inference_prompt_requires_external_ollama_runtime_when_unreach
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let _tier_guard = EnvVarGuard::unset("OPENHUMAN_LOCAL_AI_TIER");
     let _ollama_url_guard = EnvVarGuard::set("OPENHUMAN_OLLAMA_BASE_URL", "http://127.0.0.1:1");
 
@@ -3948,294 +3495,6 @@ async fn json_rpc_inference_prompt_requires_external_ollama_runtime_when_unreach
     rpc_join.abort();
 }
 
-// ── Billing & Team E2E tests ──────────────────────────────────────────────────
-
-/// End-to-end test for billing RPC methods.
-///
-/// Spins up an in-process Axum mock backend and a real JSON-RPC server, stores a
-/// session JWT, then exercises every billing controller through the RPC surface
-/// exactly as the desktop app or a CI script would.
-#[tokio::test]
-async fn billing_rpc_e2e() {
-    let _env_lock = json_rpc_e2e_env_lock();
-    let tmp = tempdir().expect("tempdir");
-    let home = tmp.path();
-    let openhuman_home = home.join(".openhuman");
-
-    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
-    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-
-    let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
-    let mock_origin = format!("http://{}", mock_addr);
-    write_min_config(&openhuman_home, &mock_origin);
-
-    // Pre-create the user-scoped config so store_session finds correct settings.
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config(&user_scoped_dir, &mock_origin);
-
-    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
-    let rpc_base = format!("http://{}", rpc_addr);
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Store a session first — all billing methods require it.
-    let store = post_json_rpc(
-        &rpc_base,
-        1,
-        "openhuman.auth_store_session",
-        json!({ "token": "e2e-billing-jwt", "user_id": "e2e-user" }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
-
-    // Helper: the RPC outcome wraps backend data in {result: ..., logs: [...]}.
-    // We peel off the inner "result" field to get the actual backend payload.
-    fn inner(outer: &Value, _ctx: &str) -> Value {
-        outer
-            .get("result")
-            .cloned()
-            .unwrap_or_else(|| outer.clone())
-    }
-
-    // --- billing_get_current_plan ---
-    let plan = post_json_rpc(
-        &rpc_base,
-        2,
-        "openhuman.billing_get_current_plan",
-        json!({}),
-    )
-    .await;
-    let plan_outer = assert_no_jsonrpc_error(&plan, "billing_get_current_plan");
-    let plan_result = inner(plan_outer, "billing_get_current_plan");
-    assert_eq!(
-        plan_result.get("plan").and_then(Value::as_str),
-        Some("PRO"),
-        "expected PRO plan: {plan_result}"
-    );
-    assert_eq!(
-        plan_result
-            .get("hasActiveSubscription")
-            .and_then(Value::as_bool),
-        Some(true),
-        "expected active subscription: {plan_result}"
-    );
-
-    // --- billing_purchase_plan ---
-    let purchase = post_json_rpc(
-        &rpc_base,
-        3,
-        "openhuman.billing_purchase_plan",
-        json!({ "plan": "pro" }),
-    )
-    .await;
-    let purchase_outer = assert_no_jsonrpc_error(&purchase, "billing_purchase_plan");
-    let purchase_result = inner(purchase_outer, "billing_purchase_plan");
-    assert!(
-        purchase_result
-            .get("checkoutUrl")
-            .and_then(Value::as_str)
-            .is_some(),
-        "expected checkoutUrl: {purchase_result}"
-    );
-
-    // --- billing_create_portal_session ---
-    let portal = post_json_rpc(
-        &rpc_base,
-        4,
-        "openhuman.billing_create_portal_session",
-        json!({}),
-    )
-    .await;
-    let portal_outer = assert_no_jsonrpc_error(&portal, "billing_create_portal_session");
-    let portal_result = inner(portal_outer, "billing_create_portal_session");
-    assert!(
-        portal_result
-            .get("portalUrl")
-            .and_then(Value::as_str)
-            .is_some(),
-        "expected portalUrl: {portal_result}"
-    );
-
-    // --- billing_top_up ---
-    let top_up = post_json_rpc(
-        &rpc_base,
-        5,
-        "openhuman.billing_top_up",
-        json!({ "amountUsd": 10.0, "gateway": "stripe" }),
-    )
-    .await;
-    let top_up_outer = assert_no_jsonrpc_error(&top_up, "billing_top_up");
-    let top_up_result = inner(top_up_outer, "billing_top_up");
-    assert_eq!(
-        top_up_result.get("amountUsd").and_then(Value::as_f64),
-        Some(10.0),
-        "expected amountUsd 10.0: {top_up_result}"
-    );
-
-    // --- billing_create_coinbase_charge ---
-    let charge = post_json_rpc(
-        &rpc_base,
-        6,
-        "openhuman.billing_create_coinbase_charge",
-        json!({ "plan": "pro" }),
-    )
-    .await;
-    let charge_outer = assert_no_jsonrpc_error(&charge, "billing_create_coinbase_charge");
-    let charge_result = inner(charge_outer, "billing_create_coinbase_charge");
-    assert!(
-        charge_result
-            .get("hostedUrl")
-            .and_then(Value::as_str)
-            .is_some(),
-        "expected hostedUrl: {charge_result}"
-    );
-    assert_eq!(
-        charge_result.get("status").and_then(Value::as_str),
-        Some("NEW"),
-        "expected NEW status: {charge_result}"
-    );
-
-    mock_join.abort();
-    rpc_join.abort();
-}
-
-/// End-to-end test for team RPC methods.
-///
-/// Spins up an in-process Axum mock backend and a real JSON-RPC server, stores a
-/// session JWT, then exercises every team controller through the RPC surface.
-#[tokio::test]
-async fn team_rpc_e2e() {
-    let _env_lock = json_rpc_e2e_env_lock();
-    let tmp = tempdir().expect("tempdir");
-    let home = tmp.path();
-    let openhuman_home = home.join(".openhuman");
-
-    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
-    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
-
-    let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
-    let mock_origin = format!("http://{}", mock_addr);
-    write_min_config(&openhuman_home, &mock_origin);
-
-    // Pre-create the user-scoped config so store_session finds correct settings.
-    let user_scoped_dir = openhuman_home.join("users").join("e2e-user");
-    write_min_config(&user_scoped_dir, &mock_origin);
-
-    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
-    let rpc_base = format!("http://{}", rpc_addr);
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Store a session first — all team methods require it.
-    let store = post_json_rpc(
-        &rpc_base,
-        1,
-        "openhuman.auth_store_session",
-        json!({ "token": "e2e-team-jwt", "user_id": "e2e-user" }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&store, "store_session");
-
-    // Helper: peel off the inner "result" field from the RPC outcome envelope.
-    fn inner(outer: &Value, _ctx: &str) -> Value {
-        outer
-            .get("result")
-            .cloned()
-            .unwrap_or_else(|| outer.clone())
-    }
-
-    let team_id = "team-1";
-
-    // --- team_list_members ---
-    let members = post_json_rpc(
-        &rpc_base,
-        2,
-        "openhuman.team_list_members",
-        json!({ "teamId": team_id }),
-    )
-    .await;
-    let members_outer = assert_no_jsonrpc_error(&members, "team_list_members");
-    let members_result = inner(members_outer, "team_list_members");
-    let members_arr = members_result
-        .as_array()
-        .expect("expected array of members");
-    assert_eq!(members_arr.len(), 2, "expected 2 members: {members_result}");
-    assert_eq!(
-        members_arr[0].get("username").and_then(Value::as_str),
-        Some("alice")
-    );
-
-    // --- team_create_invite ---
-    let invite = post_json_rpc(
-        &rpc_base,
-        3,
-        "openhuman.team_create_invite",
-        json!({ "teamId": team_id, "maxUses": 3, "expiresInDays": 7 }),
-    )
-    .await;
-    let invite_outer = assert_no_jsonrpc_error(&invite, "team_create_invite");
-    let invite_result = inner(invite_outer, "team_create_invite");
-    assert!(
-        invite_result.get("code").and_then(Value::as_str).is_some(),
-        "expected invite code: {invite_result}"
-    );
-
-    // --- team_list_invites ---
-    let invites = post_json_rpc(
-        &rpc_base,
-        4,
-        "openhuman.team_list_invites",
-        json!({ "teamId": team_id }),
-    )
-    .await;
-    let invites_outer = assert_no_jsonrpc_error(&invites, "team_list_invites");
-    let invites_result = inner(invites_outer, "team_list_invites");
-    let invites_arr = invites_result
-        .as_array()
-        .expect("expected array of invites");
-    assert!(
-        !invites_arr.is_empty(),
-        "expected at least one invite: {invites_result}"
-    );
-
-    // --- team_revoke_invite (no payload to check, just assert no error) ---
-    let revoke = post_json_rpc(
-        &rpc_base,
-        5,
-        "openhuman.team_revoke_invite",
-        json!({ "teamId": team_id, "inviteId": "inv-1" }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&revoke, "team_revoke_invite");
-
-    // --- team_remove_member ---
-    let remove = post_json_rpc(
-        &rpc_base,
-        6,
-        "openhuman.team_remove_member",
-        json!({ "teamId": team_id, "userId": "user-2" }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&remove, "team_remove_member");
-
-    // --- team_change_member_role ---
-    let role_change = post_json_rpc(
-        &rpc_base,
-        7,
-        "openhuman.team_change_member_role",
-        json!({ "teamId": team_id, "userId": "user-1", "role": "MEMBER" }),
-    )
-    .await;
-    assert_no_jsonrpc_error(&role_change, "team_change_member_role");
-
-    mock_join.abort();
-    rpc_join.abort();
-}
-
 #[tokio::test]
 async fn about_app_rpc_list_lookup_and_search() {
     let _env_lock = json_rpc_e2e_env_lock();
@@ -4245,8 +3504,6 @@ async fn about_app_rpc_list_lookup_and_search() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -4302,25 +3559,25 @@ async fn about_app_rpc_list_lookup_and_search() {
         &rpc_base,
         202,
         "openhuman.about_app_lookup",
-        json!({ "id": "team.generate_invite_codes" }),
+        json!({ "id": "local_ai.download_model" }),
     )
     .await;
     let lookup_outer = assert_no_jsonrpc_error(&lookup, "about_app_lookup");
     let lookup_result = inner(lookup_outer);
     assert_eq!(
         lookup_result.get("id").and_then(Value::as_str),
-        Some("team.generate_invite_codes")
+        Some("local_ai.download_model")
     );
     assert_eq!(
         lookup_result.get("category").and_then(Value::as_str),
-        Some("team")
+        Some("local_ai")
     );
 
     let search = post_json_rpc(
         &rpc_base,
         203,
         "openhuman.about_app_search",
-        json!({ "query": "invite" }),
+        json!({ "query": "model" }),
     )
     .await;
     let search_outer = assert_no_jsonrpc_error(&search, "about_app_search");
@@ -4330,15 +3587,15 @@ async fn about_app_rpc_list_lookup_and_search() {
         .expect("about_app search should return an array");
     assert!(
         search_capabilities.iter().any(|capability| {
-            capability.get("id").and_then(Value::as_str) == Some("team.join_via_invite_code")
+            capability.get("id").and_then(Value::as_str) == Some("local_ai.download_model")
         }),
-        "expected invite-related capability in search results: {search_result}"
+        "expected model-related capability in search results: {search_result}"
     );
     assert!(
         search_capabilities.iter().any(|capability| {
-            capability.get("id").and_then(Value::as_str) == Some("team.generate_invite_codes")
+            capability.get("id").and_then(Value::as_str) == Some("local_ai.whisper_installer")
         }),
-        "expected invite generation capability in search results: {search_result}"
+        "expected model installer capability in search results: {search_result}"
     );
 
     mock_join.abort();
@@ -4354,8 +3611,6 @@ async fn voice_status_returns_availability() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     let _whisper_guard = EnvVarGuard::unset("WHISPER_BIN");
     let _piper_guard = EnvVarGuard::unset("PIPER_BIN");
 
@@ -4415,8 +3670,6 @@ async fn notification_settings_roundtrip_and_disabled_ingest_skip() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -4506,11 +3759,9 @@ async fn credentials_crud_roundtrip() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
-    // A mock upstream is required so config validation passes and api_url is
-    // well-formed, even though provider-credential calls don't hit the network.
+    // Seed a direct mock provider config even though provider-credential calls
+    // don't hit the network.
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
     write_min_config(&openhuman_home, &mock_origin);
@@ -4964,8 +4215,6 @@ async fn channels_status_reflects_managed_dm_credential_e2e() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -5064,8 +4313,6 @@ async fn whatsapp_data_ingest_and_query_e2e() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -5334,8 +4581,6 @@ async fn whatsapp_memory_doc_ingest_e2e() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
     // Disable strict embedding so ingest falls back to the Inert
     // (zero-vector) embedder when no Ollama endpoint is reachable. CI
     // has no local Ollama; without this the memory_doc_ingest call
@@ -5453,8 +4698,6 @@ async fn voice_cloud_transcribe_registered_e2e() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
     let mock_origin = format!("http://{}", mock_addr);
@@ -5520,8 +4763,6 @@ async fn json_rpc_meet_join_call_validates_and_returns_request_id() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{}", rpc_addr);
@@ -5608,8 +4849,6 @@ async fn json_rpc_meet_agent_session_lifecycle() {
 
     let _home_guard = EnvVarGuard::set_to_path("HOME", home);
     let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-    let _backend_url_guard = EnvVarGuard::unset("BACKEND_URL");
-    let _vite_backend_guard = EnvVarGuard::unset("VITE_BACKEND_URL");
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{}", rpc_addr);

@@ -37,10 +37,6 @@ vi.mock('../../../providers/CoreStateProvider', () => ({
 
 vi.mock('../../../store', () => ({ persistor: { purge: vi.fn().mockResolvedValue(undefined) } }));
 
-vi.mock('../../../utils/links', () => ({ BILLING_DASHBOARD_URL: 'https://billing.example.com' }));
-
-vi.mock('../../../utils/openUrl', () => ({ openUrl: vi.fn().mockResolvedValue(undefined) }));
-
 vi.mock('../../../utils/tauriCommands', () => ({
   resetOpenHumanDataAndRestartCore: vi.fn().mockResolvedValue(undefined),
   restartApp: vi.fn().mockResolvedValue(undefined),
@@ -76,10 +72,10 @@ describe('SettingsHome', () => {
   });
 
   describe('flat menu', () => {
-    // Section headers ("General", "Features & AI", "Billing & Rewards",
-    // "Support", "Danger Zone") were intentionally removed — the menu is
+    // Section headers ("General", "Features & AI", "Support",
+    // "Danger Zone") were intentionally removed — the menu is
     // now a single flat list to reduce visual noise.
-    it.each(['General', 'Features & AI', 'Billing & Rewards', 'Support', 'Danger Zone'])(
+    it.each(['General', 'Features & AI', 'Support', 'Danger Zone'])(
       'does not render section header: %s',
       label => {
         renderSettingsHome();
@@ -92,7 +88,6 @@ describe('SettingsHome', () => {
       expect(screen.getByText('Account')).toBeInTheDocument();
       expect(screen.getByText('Alerts')).toBeInTheDocument();
       expect(screen.getByText('Notifications')).toBeInTheDocument();
-      expect(screen.getByText('Billing & Usage')).toBeInTheDocument();
       expect(screen.getByText('Advanced')).toBeInTheDocument();
       expect(screen.getByText('Clear App Data')).toBeInTheDocument();
       expect(screen.getByText('Log out')).toBeInTheDocument();
@@ -139,15 +134,6 @@ describe('SettingsHome', () => {
 
       await user.click(screen.getByText('Alerts').closest('button')!);
       expect(mockNavigate).toHaveBeenCalledWith('/notifications');
-    });
-
-    it('opens billing URL when Billing & Usage is clicked', async () => {
-      const { openUrl } = await import('../../../utils/openUrl');
-      const user = userEvent.setup();
-      renderSettingsHome();
-
-      await user.click(screen.getByText('Billing & Usage').closest('button')!);
-      expect(openUrl).toHaveBeenCalledWith('https://billing.example.com');
     });
 
     it('navigates to developer-options when Advanced is clicked', async () => {

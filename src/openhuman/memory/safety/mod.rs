@@ -168,7 +168,7 @@ static REDACTION_PATTERNS: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
             "[REDACTED]",
         ),
         (
-            // Twilio API key SID.
+            // Phone/SMS provider API key SID.
             Regex::new(r"\bSK[a-fA-F0-9]{32}\b").expect("valid twilio sid redaction"),
             "[REDACTED]",
         ),

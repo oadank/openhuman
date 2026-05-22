@@ -16,10 +16,6 @@ vi.mock('../../utils/config', async importOriginal => {
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => vi.fn() }));
 
-vi.mock('../../hooks/useUsageState', () => ({
-  useUsageState: () => ({ isRateLimited: false, shouldShowBudgetCompletedMessage: false }),
-}));
-
 // Default: return 'ok' so most tests see the normal state. The
 // blocking-state selector is the only thing this mock is asked to
 // resolve from the live code; Home.tsx also reads `theme.mode`, which

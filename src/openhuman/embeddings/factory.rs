@@ -2,17 +2,13 @@
 
 use std::sync::Arc;
 
-use super::cloud::{
-    OpenHumanCloudEmbedding, DEFAULT_CLOUD_EMBEDDING_DIMENSIONS, DEFAULT_CLOUD_EMBEDDING_MODEL,
-};
 use super::provider_trait::EmbeddingProvider;
 use super::{NoopEmbedding, OllamaEmbedding, OpenAiEmbedding};
 
 /// Creates an embedding provider based on the specified name and configuration.
 ///
 /// Supported provider names:
-/// - `"cloud"` → OpenHuman backend (Voyage-backed) — default, preferred
-/// - `"ollama"` → local Ollama server (opt-in for offline-only installs)
+/// - `"ollama"` → local Ollama server
 /// - `"openai"` → OpenAI API
 /// - `"custom:<url>"` → OpenAI-compatible endpoint
 /// - `"none"` → no-op (keyword-only search, no embeddings)
@@ -26,9 +22,6 @@ pub fn create_embedding_provider(
     dims: usize,
 ) -> anyhow::Result<Box<dyn EmbeddingProvider>> {
     match provider {
-        "cloud" => Ok(Box::new(OpenHumanCloudEmbedding::new(
-            None, None, true, model, dims,
-        ))),
         "ollama" => {
             let base_url = crate::openhuman::inference::local::ollama_base_url();
             Ok(Box::new(OllamaEmbedding::try_new(&base_url, model, dims)?))
@@ -46,24 +39,14 @@ pub fn create_embedding_provider(
         "none" => Ok(Box::new(NoopEmbedding)),
         unknown => Err(anyhow::anyhow!(
             "unknown embedding provider: \"{unknown}\". \
-             Supported: \"cloud\", \"ollama\", \"openai\", \"custom:<url>\", \"none\""
+             Supported: \"ollama\", \"openai\", \"custom:<url>\", \"none\""
         )),
     }
 }
 
-/// Returns the default embedding provider — cloud (OpenHuman backend, Voyage).
-///
-/// The cloud embedder lazily resolves the session JWT and API URL on each
-/// call, so this can be constructed before login completes; the first
-/// `embed()` will fail with a clear message if the user is unauthenticated.
+/// Returns the default local Ollama-backed embedding provider.
 pub fn default_embedding_provider() -> Arc<dyn EmbeddingProvider> {
-    Arc::new(OpenHumanCloudEmbedding::new(
-        None,
-        None,
-        true,
-        DEFAULT_CLOUD_EMBEDDING_MODEL,
-        DEFAULT_CLOUD_EMBEDDING_DIMENSIONS,
-    ))
+    Arc::new(OllamaEmbedding::default())
 }
 
 /// Returns the local Ollama-backed embedding provider. Only used when the

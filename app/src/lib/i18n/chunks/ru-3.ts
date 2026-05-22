@@ -316,7 +316,6 @@ const ru3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'Пропустить',
   'app.openhumanLink.telegramUnavailable': 'Telegram недоступен',
   'app.openhumanLink.title.accounts': 'Подключи свои приложения',
-  'app.openhumanLink.title.billing': 'Оплата и кредиты',
   'app.openhumanLink.title.discord': 'Вступи в сообщество',
   'app.openhumanLink.title.messaging': 'Подключи канал связи',
   'app.openhumanLink.title.notifications': 'Разрешить уведомления',

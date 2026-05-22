@@ -16,8 +16,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { getCoreStateSnapshot } from '../lib/coreState/store';
-import { getBackendUrl } from '../services/backendUrl';
 import type {
   ActionableItem,
   ActionableItemPriority,
@@ -173,10 +171,9 @@ export function useConsciousItems(): UseConsciousItemsResult {
   }, []);
 
   const triggerAnalysis = useCallback(async () => {
-    const authToken = getCoreStateSnapshot().snapshot.sessionToken;
-    if (!isTauri() || !authToken || isRunning) return;
+    if (!isTauri() || isRunning) return;
     try {
-      await consciousLoopRun(authToken, await getBackendUrl());
+      await consciousLoopRun();
     } catch (err) {
       console.warn('[conscious] Failed to trigger analysis:', err);
     }

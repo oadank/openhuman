@@ -432,26 +432,15 @@ impl Default for WebSearchConfig {
     }
 }
 
-/// Composio integration routing mode for the main backend-proxied flow.
+/// Composio integration routing mode.
 ///
-/// `"backend"` (default) — every Composio call (toolkits, connections,
-/// authorize, tools, execute, triggers, …) is proxied through the
-/// OpenHuman backend (`api.tinyhumans.ai/agent-integrations/composio/*`).
-/// The backend owns the Composio API key, allowlist, billing/margin, and
-/// HMAC-verified trigger webhooks fanned out over socket.io.
-///
-/// `"direct"` — the core hits `https://backend.composio.dev/api/v{2,3}`
-/// directly with the user's own Composio API key (BYO). Tool execution is
-/// synchronous and works fully sovereign. Real-time **trigger webhooks**
-/// (the async push surface that the backend currently mediates via
-/// socket.io) do not work in direct mode — the user has to enable them
-/// out-of-band on Composio's dashboard and configure their own webhook
-/// sink. See `tools/impl/network/composio.rs` for the underlying client.
-pub const COMPOSIO_MODE_BACKEND: &str = "backend";
+/// `"direct"` means the core calls `https://backend.composio.dev/api/v{2,3}`
+/// with the user's own Composio API key. Legacy `"backend"` config values
+/// are normalized to `"direct"` by the client factory.
 pub const COMPOSIO_MODE_DIRECT: &str = "direct";
 
 fn default_composio_mode() -> String {
-    COMPOSIO_MODE_BACKEND.into()
+    COMPOSIO_MODE_DIRECT.into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -473,10 +462,8 @@ pub struct ComposioConfig {
     #[serde(default)]
     pub triage_disabled_toolkits: Vec<String>,
 
-    /// Routing mode for the main Composio integration flow. One of
-    /// [`COMPOSIO_MODE_BACKEND`] (default — proxied through the OpenHuman
-    /// backend) or [`COMPOSIO_MODE_DIRECT`] (BYO API key, calls
-    /// `backend.composio.dev` directly).
+    /// Routing mode for the Composio integration flow. Only
+    /// [`COMPOSIO_MODE_DIRECT`] is supported.
     ///
     /// The user-provided API key for direct mode is *not* stored in the
     /// TOML — it lives in the encrypted keychain via
@@ -602,57 +589,10 @@ pub struct ComputerControlConfig {
     pub enabled: bool,
 }
 
-// ── Agent integration tools (backend-proxied) ───────────────────────
+// ── Legacy integration config section ───────────────────────────────
 
-/// Per-integration on/off toggle.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-pub struct IntegrationToggle {
-    #[serde(default = "defaults::default_true")]
-    pub enabled: bool,
-}
-
-impl Default for IntegrationToggle {
-    fn default() -> Self {
-        Self {
-            enabled: defaults::default_true(),
-        }
-    }
-}
-
-/// Agent integration tools that proxy through the backend API.
-///
-/// The backend URL and auth token are **not** configurable here —
-/// they're always resolved from the core `config.api_url` plus the
-/// app-session JWT.
-/// Composio in particular is unconditionally enabled and has no toggle:
-/// as long as the user is signed in, composio tools are available.
-///
-/// The per-tool `apify`, `twilio`, `google_places`, and `parallel`
-/// flags below are preserved because those integrations incur per-call
-/// costs that the user may legitimately want to turn off; composio
-/// costs are metered server-side, so there is no client-side toggle
-/// for it.
+/// Empty compatibility section for older config files that still contain
+/// `[integrations]`. Backend-proxied integration toggles were removed.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(default)]
-pub struct IntegrationsConfig {
-    /// Apify actor execution and scraper integration.
-    #[serde(default)]
-    pub apify: IntegrationToggle,
-
-    /// Twilio phone-call integration.
-    #[serde(default)]
-    pub twilio: IntegrationToggle,
-
-    /// Google Places location search integration.
-    #[serde(default)]
-    pub google_places: IntegrationToggle,
-
-    /// Parallel web search & content extraction integration.
-    #[serde(default)]
-    pub parallel: IntegrationToggle,
-
-    /// Stock-price / market-data integration (Alpha Vantage on the backend).
-    #[serde(default)]
-    pub stock_prices: IntegrationToggle,
-}
+pub struct IntegrationsConfig {}

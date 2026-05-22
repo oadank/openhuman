@@ -45,7 +45,7 @@ let resolvingCoreRpcToken: Promise<string | null> | null = null;
  * Stable classification of an RPC failure. Callers (hooks, providers, Sentry
  * filters) should branch on `kind` — never on raw message regexes. The shape
  * exists so a single 401 from the Rust backend (`Session expired. Please log
- * in again.`) can drive both a silent swallow in usage/credits chains AND
+ * in again.`) can drive both caller-specific handling AND
  * a global reauth signal without every caller re-implementing the regex.
  */
 export type CoreRpcErrorKind =
@@ -73,9 +73,8 @@ const AUTH_EXPIRED_EVENT = 'core-rpc-auth-expired';
 
 /**
  * Classify an RPC error from its surfaced message and (when available) the
- * HTTP status the core returned. Patterns map to the Rust-side error shapes
- * produced by `src/openhuman/backend_api/*` (`authed_json`, rate limiter,
- * budget guard) and `reqwest::Error`'s connect/timeout variants.
+ * HTTP status the core returned. Patterns map to Rust-side rate limiter /
+ * budget guard errors and `reqwest::Error` connect/timeout variants.
  */
 export function classifyRpcError(
   message: string,
@@ -86,12 +85,6 @@ export function classifyRpcError(
   if (httpStatus === 401) return 'auth_expired';
   if (httpStatus === 429) return 'rate_limited';
   if (/\(401\b.*Unauthorized\)|Session expired/i.test(message)) return 'auth_expired';
-  // Core-side "no backend session token" → the auth profile is gone but the
-  // frontend may still hold a stale sessionToken from an optimistic post-login
-  // patch. Treat as auth-expired so `CoreStateProvider` clears the session and
-  // `ProtectedRoute` bounces the user back to `/` (login) instead of trapping
-  // them on an onboarding step that polls a failing RPC every 5 s.
-  if (/no backend session token/i.test(message)) return 'auth_expired';
   if (/429.*rate.?limit/i.test(message)) return 'rate_limited';
   if (/Budget exceeded|Insufficient budget/i.test(message)) return 'budget_exceeded';
   if (/error sending request|client error \(Connect\)|timed out|ECONNREFUSED/i.test(message)) {

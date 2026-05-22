@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // Russian (Русский) chunk 5/5. Translated from chunks/en-5.ts.
 const ru5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'Улучшить',
-  'settings.billing.subscription.waiting': 'Ожидание',
-  'settings.billing.subscription.waitingPayment': 'Ожидание оплаты',
   'settings.composio.apiKeyDesc': 'API-ключ Composio сейчас сохранён на этом устройстве.',
   'settings.composio.apiKeyLabel': 'API-ключ Composio',
   'settings.composio.apiKeyStored': 'API-ключ сохранён',
@@ -358,22 +354,6 @@ const ru5: TranslationMap = {
   'skills.uninstall.title': 'Удалить',
   'skills.uninstall.uninstallBtn': 'Удалить',
   'skills.uninstall.uninstalling': 'Удаление…',
-  'upsell.global.limitMessage': 'Улучши план или пополни кредиты для продолжения',
-  'upsell.global.limitTitle': 'Ты',
-  'upsell.global.nearLimitMessage':
-    'Ты использовал {pct}% лимита. Улучши план для увеличения лимитов.',
-  'upsell.global.nearLimitTitle': 'Лимит использования близко',
-  'upsell.usageLimit.bodyBudget':
-    'Вы достигли недельного лимита.{reset} Обновите план или пополните кредиты, чтобы избежать ограничений.',
-  'upsell.usageLimit.bodyRate':
-    'Вы достигли 10-часового лимита частоты инференса.{reset} Обновите план для более высоких лимитов.',
-  'upsell.usageLimit.heading': 'Лимит использования достигнут',
-  'upsell.usageLimit.notNow': 'Не сейчас',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'Сбросится {time}.',
-  'upsell.usageLimit.upgradePlan': 'Улучшить план',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': 'Поехали!',
   'walkthrough.tooltip.next': 'Далее →',
   'walkthrough.tooltip.skip': 'Пропустить тур',

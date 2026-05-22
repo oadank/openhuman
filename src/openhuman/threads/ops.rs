@@ -324,7 +324,7 @@ pub async fn thread_generate_title(
 
     let provider = match provider::create_intelligent_routing_provider(
         config.inference_url.as_deref(),
-        config.api_url.as_deref(),
+        None,
         config.api_key.as_deref(),
         &config,
         &provider_runtime_options,

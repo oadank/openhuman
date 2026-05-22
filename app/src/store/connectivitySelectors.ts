@@ -20,7 +20,7 @@ export const selectConnectivityErrors = (s: RootState) => s.connectivity.lastErr
 export const selectBlockingState = (s: RootState): BlockingState => {
   if (s.connectivity.internet === 'offline') return 'internet-offline';
   if (s.connectivity.core === 'unreachable') return 'core-unreachable';
-  // `backend-only` (Socket.IO link to the hosted OpenHuman backend
+  // `backend-only` (legacy hosted app socket
   // disconnected) is intentionally never returned in the local-OAuth
   // fork — the backend was removed, so the channel is permanently
   // "disconnected" and the soft banner would never lift. The

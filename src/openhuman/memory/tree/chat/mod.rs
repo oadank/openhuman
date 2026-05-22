@@ -48,7 +48,7 @@ use async_trait::async_trait;
 
 use crate::openhuman::config::{Config, DEFAULT_CLOUD_LLM_MODEL};
 use crate::openhuman::inference::provider::factory::{
-    create_chat_provider_from_string, provider_for_role, PROVIDER_OPENHUMAN,
+    create_chat_provider_from_string, provider_for_role,
 };
 
 pub mod local;
@@ -184,7 +184,7 @@ pub fn build_chat_provider(
             consumer.as_str(),
             resolved
         );
-        if resolved == PROVIDER_OPENHUMAN {
+        if resolved.trim().is_empty() {
             // Factory would hard-error in `make_openhuman_backend`. Surface
             // the same actionable message instead of waiting for the
             // first call to fail.
@@ -262,7 +262,7 @@ pub fn build_chat_provider_for_role(
         role,
         resolved
     );
-    if resolved == PROVIDER_OPENHUMAN {
+    if resolved.trim().is_empty() {
         anyhow::bail!(
             "[memory_tree::chat] no provider configured for the {role} workload — \
              add a `cloud_providers` entry or set `{role}_provider` to an explicit \

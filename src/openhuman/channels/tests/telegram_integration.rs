@@ -107,7 +107,6 @@ fn make_test_context(
         conversation_histories: Arc::new(Mutex::new(HashMap::new())),
         provider_cache: Arc::new(Mutex::new(HashMap::new())),
         route_overrides: Arc::new(Mutex::new(HashMap::new())),
-        api_url: None,
         inference_url: None,
         reliability: Arc::new(crate::openhuman::config::ReliabilityConfig::default()),
         provider_runtime_options:

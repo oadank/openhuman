@@ -2,7 +2,6 @@
 
 use crate::openhuman::config::rpc as config_rpc;
 use crate::openhuman::credentials::rpc;
-use crate::openhuman::credentials::APP_SESSION_PROVIDER;
 
 pub fn parse_field_equals_entries(entries: &[String]) -> Result<serde_json::Value, String> {
     let mut fields = serde_json::Map::new();
@@ -36,26 +35,21 @@ pub async fn cli_auth_login(
     let config = config_rpc::load_config_with_timeout().await?;
     let provider = provider.trim().to_string();
 
-    if provider == APP_SESSION_PROVIDER {
-        rpc::store_session(&config, &token, user_id, user_json)
-            .await?
-            .into_cli_compatible_json()
-    } else {
-        let fields_opt = match &fields {
-            serde_json::Value::Object(map) if map.is_empty() => None,
-            _ => Some(fields),
-        };
-        rpc::store_provider_credentials(
-            &config,
-            &provider,
-            profile.as_deref(),
-            Some(token),
-            fields_opt,
-            Some(set_active),
-        )
-        .await?
-        .into_cli_compatible_json()
-    }
+    let _ = (user_id, user_json);
+    let fields_opt = match &fields {
+        serde_json::Value::Object(map) if map.is_empty() => None,
+        _ => Some(fields),
+    };
+    rpc::store_provider_credentials(
+        &config,
+        &provider,
+        profile.as_deref(),
+        Some(token),
+        fields_opt,
+        Some(set_active),
+    )
+    .await?
+    .into_cli_compatible_json()
 }
 
 pub async fn cli_auth_logout(
@@ -64,15 +58,9 @@ pub async fn cli_auth_logout(
 ) -> Result<serde_json::Value, String> {
     let config = config_rpc::load_config_with_timeout().await?;
     let provider = provider.trim().to_string();
-    if provider == APP_SESSION_PROVIDER {
-        rpc::clear_session(&config)
-            .await?
-            .into_cli_compatible_json()
-    } else {
-        rpc::remove_provider_credentials(&config, &provider, profile.as_deref())
-            .await?
-            .into_cli_compatible_json()
-    }
+    rpc::remove_provider_credentials(&config, &provider, profile.as_deref())
+        .await?
+        .into_cli_compatible_json()
 }
 
 pub async fn cli_auth_status(
@@ -81,15 +69,9 @@ pub async fn cli_auth_status(
 ) -> Result<serde_json::Value, String> {
     let config = config_rpc::load_config_with_timeout().await?;
     let provider = provider.trim().to_string();
-    if provider == APP_SESSION_PROVIDER {
-        rpc::auth_get_state(&config)
-            .await?
-            .into_cli_compatible_json()
-    } else {
-        rpc::list_provider_credentials(&config, Some(provider))
-            .await?
-            .into_cli_compatible_json()
-    }
+    rpc::list_provider_credentials(&config, Some(provider))
+        .await?
+        .into_cli_compatible_json()
 }
 
 pub async fn cli_auth_list(provider_filter: Option<String>) -> Result<serde_json::Value, String> {

@@ -21,13 +21,10 @@ hint = "agentic"
 [tools]
 # Narrow allowlist. Wallet + market primitives only — no shell, no
 # file_write, no broad HTTP, no integration delegation. Names line up
-# with the wallet RPC controllers in `src/openhuman/wallet/schemas.rs`
-# (read: status/balances/supported_assets/chain_status; quote/prepare:
-# prepare_transfer/prepare_swap/prepare_contract_call; execute:
-# execute_prepared) and the financial-apis crypto/FX series exposed
-# via `stock_*`. Tools that aren't yet registered are silently dropped
-# by the tool filter at spawn time, so this list also describes the
-# agent's *intended* tool surface as wallet + exchange tools land.
+# with the wallet RPC controllers in `src/openhuman/wallet/schemas.rs`.
+# Tools that aren't yet registered are silently dropped by the tool filter
+# at spawn time, so this list also describes the agent's intended wallet
+# surface as exchange tools land.
 named = [
     # Read-only wallet inspection.
     "wallet_status",
@@ -46,11 +43,6 @@ named = [
     # parameters — only consumes a `prepared_id` returned by the
     # matching `wallet_prepare_*` call earlier in this turn.
     "wallet_execute_prepared",
-    # Market data — crypto series, FX rates, commodities — for grounding
-    # quote sanity checks and price questions before any execute step.
-    "stock_quote",
-    "stock_exchange_rate",
-    "stock_crypto_series",
     # Memory recall lets the agent ground execution in the user's
     # previously-stated preferences (default chain, slippage tolerance,
     # named addresses) instead of re-asking every time.

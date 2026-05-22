@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::openhuman::composio::client::{
-    create_composio_client, direct_execute, ComposioClient, ComposioClientKind,
+    create_composio_client, direct_execute, ComposioClientKind,
 };
 use crate::openhuman::composio::types::ComposioExecuteResponse;
 use crate::openhuman::config::rpc as config_rpc;
@@ -83,13 +83,8 @@ impl SyncOutcome {
 /// connection" mode (e.g. an across-the-board periodic sync that
 /// already iterated). For per-connection paths it is always populated.
 ///
-/// **Mode-aware dispatch (#1710)**: pre-fix, `ProviderContext` cached a
-/// pre-baked [`ComposioClient`] built once at construction time. Toggling
-/// `composio.mode = "direct"` mid-session left provider syncs still
-/// routing through the backend tinyhumans tenant. The current shape
-/// keeps an [`Arc<Config>`] and resolves the underlying client per call
-/// through [`ProviderContext::execute`], mirroring the agent-tool
-/// migration in [`crate::openhuman::composio::tools::ComposioExecuteTool`].
+/// Provider contexts keep an [`Arc<Config>`] and resolve the direct
+/// Composio client per call through [`ProviderContext::execute`].
 #[derive(Clone)]
 pub struct ProviderContext {
     pub config: Arc<Config>,
@@ -114,11 +109,8 @@ impl ProviderContext {
         toolkit: impl Into<String>,
         connection_id: Option<String>,
     ) -> Option<Self> {
-        // Probe the factory: any successful resolve (Backend OR Direct)
-        // means the user has *some* viable Composio client. Direct-mode
-        // users typically have no backend session token, which would
-        // make a `build_composio_client` probe return None and falsely
-        // skip them.
+        // Probe the factory: a successful resolve means the user has a
+        // viable direct Composio client.
         match create_composio_client(&config) {
             Ok(_) => Some(Self {
                 config,
@@ -136,16 +128,7 @@ impl ProviderContext {
         }
     }
 
-    /// Resolve the underlying composio client via the mode-aware
-    /// factory and dispatch a single action. This is the canonical
-    /// way for provider implementations to execute a Composio action
-    /// — going through here ensures the live `composio.mode` toggle is
-    /// honoured on every call (#1710).
-    ///
-    /// Returns the same [`ComposioExecuteResponse`] shape that
-    /// [`ComposioClient::execute_tool`] used to return so existing
-    /// provider call-sites can swap `ctx.client.execute_tool(...)` for
-    /// `ctx.execute(...)` with no other changes.
+    /// Resolve the direct Composio client and dispatch a single action.
     pub async fn execute(
         &self,
         action: &str,
@@ -165,61 +148,13 @@ impl ProviderContext {
             );
             anyhow::anyhow!("composio provider_context: failed to load live config: {e}")
         })?;
-        let kind = create_composio_client(&live_config)?;
-        match kind {
-            ComposioClientKind::Backend(client) => {
-                tracing::debug!(
-                    action = %action,
-                    toolkit = %self.toolkit,
-                    "[composio:provider_context] execute: backend variant"
-                );
-                client.execute_tool(action, arguments).await
-            }
-            ComposioClientKind::Direct(direct) => {
-                tracing::debug!(
-                    action = %action,
-                    toolkit = %self.toolkit,
-                    "[composio:provider_context] execute: direct variant"
-                );
-                direct_execute(&direct, action, arguments, &live_config.composio.entity_id).await
-            }
-        }
-    }
-
-    /// Resolve a `ComposioClient` for callers that need a handle to
-    /// pass to helpers built around the old `&ComposioClient` API
-    /// (e.g. `slack::users::SlackUsers::fetch`,
-    /// `slack::provider::execute_with_retry`).
-    ///
-    /// Returns `Err` when the live config selects direct mode — these
-    /// legacy helpers were written against the backend-tenant
-    /// `ComposioClient` and have not yet been ported to the factory.
-    /// Direct-mode users hit this path as a hard error rather than
-    /// silently routing through the wrong tenant.
-    pub async fn backend_client(&self) -> anyhow::Result<ComposioClient> {
-        // [#1710 Wave 4] Reload config fresh per call so a mid-session
-        // `composio.mode` toggle takes effect immediately. The Arc<Config>
-        // snapshot held by `self` was taken at agent-init time and is
-        // otherwise stale relative to subsequent set_api_key /
-        // clear_api_key RPCs.
-        let live_config = config_rpc::load_config_with_timeout().await.map_err(|e| {
-            tracing::warn!(
-                toolkit = %self.toolkit,
-                error = %e,
-                "[composio:provider_context] backend_client: load_config failed"
-            );
-            anyhow::anyhow!(
-                "composio provider_context.backend_client: failed to load live config: {e}"
-            )
-        })?;
-        match create_composio_client(&live_config)? {
-            ComposioClientKind::Backend(client) => Ok(client),
-            ComposioClientKind::Direct(_) => Err(anyhow::anyhow!(
-                "composio direct mode is not yet supported on this provider's helper path; \
-                 toolkit={}",
-                self.toolkit
-            )),
-        }
+        let ComposioClientKind::Direct(direct) = create_composio_client(&live_config)?;
+        tracing::debug!(
+            action = %action,
+            toolkit = %self.toolkit,
+            "[composio:provider_context] execute: direct"
+        );
+        direct_execute(&direct, action, arguments, &live_config.composio.entity_id).await
     }
 
     /// Memory client handle if the global memory singleton is ready.

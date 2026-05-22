@@ -5,11 +5,11 @@
  *
  *   1. Composio Gmail search (`tools_composio_execute` -> `GMAIL_FETCH_EMAILS`)
  *      to find a LinkedIn profile URL in the user's recent mail.
- *   2. Apify LinkedIn scrape — disabled (unreliable); stage is skipped.
+ *   2. LinkedIn profile scrape — disabled; stage is skipped.
  *   3. Persist a URL-only markdown via `learning_save_profile` with
  *      `summarize=true` so the core LLM compresses it into PROFILE.md.
  *
- * External calls still go through core (auth, proxy, billing). Only the
+ * External calls still go through core. Only the
  * stage-by-stage orchestration lives in the renderer.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -215,9 +215,9 @@ const ContextGatheringStep = ({
       return;
     }
 
-    // Stage 2 — Apify LinkedIn scrape (disabled: unreliable, skipped during
+    // Stage 2 — LinkedIn profile scrape (disabled; skipped during
     // profile build). PROFILE.md is built URL-only from stage 3.
-    setStage('linkedin-scrape', 'skipped', 0, 'apify_disabled');
+    setStage('linkedin-scrape', 'skipped', 0, 'profile_scrape_disabled');
     const scrapedMarkdown = '';
 
     // Stage 3 — summarize + persist via core LLM compressor

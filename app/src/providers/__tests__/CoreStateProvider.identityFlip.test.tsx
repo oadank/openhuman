@@ -78,9 +78,6 @@ function resetCoreStateStore() {
       localState: { encryptionKey: null, onboardingTasks: null },
       runtime: { screenIntelligence: null, localAi: null, autocomplete: null, service: null },
     },
-    teams: [],
-    teamMembersById: {},
-    teamInvitesById: {},
   });
 }
 
@@ -97,13 +94,10 @@ function seedAccountsWithUserAData() {
 
 describe('CoreStateProvider — identity flip cleanup (#900)', () => {
   const fetchSnapshot = vi.mocked(coreStateApi.fetchCoreAppSnapshot);
-  const listTeams = vi.mocked(coreStateApi.listTeams);
   const restartApp = vi.mocked(tauriCommands.restartApp);
 
   beforeEach(() => {
     fetchSnapshot.mockReset();
-    listTeams.mockReset();
-    listTeams.mockResolvedValue([]);
     restartApp.mockReset();
     restartApp.mockResolvedValue(undefined);
     resetCoreStateStore();

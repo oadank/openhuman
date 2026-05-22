@@ -315,7 +315,6 @@ const bn3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'এখনের জন্য এড়িয়ে যান',
   'app.openhumanLink.telegramUnavailable': 'Telegram পাওয়া যাচ্ছে না',
   'app.openhumanLink.title.accounts': 'আপনার অ্যাপ সংযুক্ত করুন',
-  'app.openhumanLink.title.billing': 'বিলিং ও ক্রেডিট',
   'app.openhumanLink.title.discord': 'কমিউনিটিতে যোগ দিন',
   'app.openhumanLink.title.messaging': 'একটি চ্যাট চ্যানেল সংযুক্ত করুন',
   'app.openhumanLink.title.notifications': 'বিজ্ঞপ্তির অনুমতি দিন',

@@ -2,22 +2,15 @@
 
 use serde_json::json;
 
-use crate::api::config::effective_backend_api_url;
-use crate::api::jwt::get_session_token;
-use crate::api::rest::{user_id_from_profile_payload, BackendOAuthClient};
 use crate::openhuman::config::Config;
-use crate::openhuman::credentials::session_support::{
-    build_session_state, parse_fields_value, profile_name_or_default, summarize_auth_profile,
-};
+use crate::openhuman::credentials::profiles::AuthProfileKind;
+use crate::openhuman::credentials::profiles::TokenSet;
+use crate::openhuman::credentials::responses::AuthStateResponse;
 use crate::openhuman::security::SecretStore;
 use crate::rpc::RpcOutcome;
 
-use super::{AuthService, APP_SESSION_PROVIDER, DEFAULT_AUTH_PROFILE_NAME};
-use crate::openhuman::config::{
-    default_root_openhuman_dir, pre_login_user_dir, read_active_user_id, user_openhuman_dir,
-    write_active_user_id,
-};
-use crate::openhuman::memory::conversations;
+use super::{AuthService, DEFAULT_AUTH_PROFILE_NAME};
+use crate::openhuman::config::default_root_openhuman_dir;
 
 /// Start all login-gated background services (local AI, voice, screen
 /// intelligence, autocomplete).  Called both from the initial boot path
@@ -98,6 +91,75 @@ fn secret_store_for_config(config: &Config) -> SecretStore {
     SecretStore::new(&data_dir, true)
 }
 
+fn profile_name_or_default(value: Option<&str>) -> &str {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(DEFAULT_AUTH_PROFILE_NAME)
+}
+
+fn parse_fields_value(
+    input: Option<serde_json::Value>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let Some(value) = input else {
+        return Ok(std::collections::HashMap::new());
+    };
+
+    let Some(map) = value.as_object() else {
+        return Err("fields must be a JSON object".to_string());
+    };
+
+    let mut out = std::collections::HashMap::new();
+    for (key, raw) in map {
+        if key.trim().is_empty() {
+            return Err("fields cannot contain empty keys".to_string());
+        }
+        let rendered = match raw {
+            serde_json::Value::Null => String::new(),
+            serde_json::Value::String(s) => s.clone(),
+            _ => raw.to_string(),
+        };
+        out.insert(key.clone(), rendered);
+    }
+
+    Ok(out)
+}
+
+fn profile_kind_label(kind: AuthProfileKind) -> String {
+    match kind {
+        AuthProfileKind::OAuth => "oauth".to_string(),
+        AuthProfileKind::Token => "token".to_string(),
+    }
+}
+
+fn summarize_auth_profile(
+    profile: &crate::openhuman::credentials::profiles::AuthProfile,
+) -> super::responses::AuthProfileSummary {
+    let mut metadata_keys = profile
+        .metadata
+        .keys()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>();
+    metadata_keys.sort();
+
+    super::responses::AuthProfileSummary {
+        id: profile.id.clone(),
+        provider: profile.provider.clone(),
+        profile_name: profile.profile_name.clone(),
+        kind: profile_kind_label(profile.kind),
+        account_id: profile.account_id.clone(),
+        workspace_id: profile.workspace_id.clone(),
+        metadata_keys,
+        updated_at: profile.updated_at.to_rfc3339(),
+        has_token: profile.token.as_ref().is_some_and(|v| !v.trim().is_empty()),
+        has_token_set: profile
+            .token_set
+            .as_ref()
+            .map(|TokenSet { access_token, .. }| !access_token.trim().is_empty())
+            .unwrap_or(false),
+    }
+}
+
 pub async fn encrypt_secret(
     config: &Config,
     plaintext: &str,
@@ -116,182 +178,7 @@ pub async fn decrypt_secret(
     Ok(RpcOutcome::single_log(plaintext, "secret decrypted"))
 }
 
-pub async fn store_session(
-    config: &Config,
-    token: &str,
-    user_id: Option<String>,
-    user: Option<serde_json::Value>,
-) -> Result<RpcOutcome<super::responses::AuthProfileSummary>, String> {
-    let trimmed_token = token.trim();
-    if trimmed_token.is_empty() {
-        return Err("token is required".to_string());
-    }
-
-    let api_url = effective_backend_api_url(&config.api_url);
-
-    let client = BackendOAuthClient::new(&api_url).map_err(|e| e.to_string())?;
-    let settings = client
-        .fetch_current_user(trimmed_token)
-        .await
-        .map_err(|e| format!("Session validation failed (GET /auth/me): {e:#}"))?;
-
-    let mut metadata = std::collections::HashMap::new();
-    if let Some(uid) = user_id
-        .and_then(|v| {
-            let t = v.trim().to_string();
-            (!t.is_empty()).then_some(t)
-        })
-        .or_else(|| user_id_from_profile_payload(&settings))
-    {
-        metadata.insert("user_id".to_string(), uid);
-    }
-    let user_for_store = sanitize_stored_session_user(user).unwrap_or(settings);
-    metadata.insert("user_json".to_string(), user_for_store.to_string());
-
-    // Determine user_id so we can scope the openhuman directory to this user.
-    let resolved_user_id = metadata.get("user_id").cloned();
-
-    // If we know the user_id, activate the user-scoped directory BEFORE storing
-    // the auth profile so that credentials land in the correct place.
-    let mut logs = vec![format!(
-        "session JWT verified via GET /auth/me on {}",
-        api_url.trim_end_matches('/')
-    )];
-
-    if let Some(ref uid) = resolved_user_id {
-        if let Ok(root_dir) = default_root_openhuman_dir() {
-            // Snapshot before we overwrite `active_user.toml` so we can tell
-            // first activation from signed-out vs an in-place account switch.
-            let previous_active = read_active_user_id(&root_dir);
-            let user_dir = user_openhuman_dir(&root_dir, uid);
-            if let Err(e) = std::fs::create_dir_all(&user_dir) {
-                tracing::warn!(
-                    user_id = %uid,
-                    error = %e,
-                    "failed to create user directory"
-                );
-            } else if let Err(e) = write_active_user_id(&root_dir, uid) {
-                tracing::warn!(
-                    user_id = %uid,
-                    error = %e,
-                    "failed to write active_user.toml"
-                );
-            } else {
-                logs.push(format!("user directory activated for {uid}"));
-                tracing::info!(
-                    user_id = %uid,
-                    user_dir = %user_dir.display(),
-                    "User-scoped directory activated"
-                );
-                // Onboarding and other pre-auth flows write threads under the
-                // `users/local/workspace` tree. After the first successful login
-                // there was no previous `active_user.toml`, wipe that anonymous
-                // conversation store so a fresh account never inherits demo or
-                // scratch threads from the pre-login bucket (#1157).
-                //
-                // This shares `memory::conversations`' process-wide mutex with
-                // `list_threads` / `purge_threads` on any workspace, so purge and
-                // concurrent thread RPC in this process cannot interleave.
-                if previous_active.is_none() {
-                    let pre_ws = pre_login_user_dir(&root_dir).join("workspace");
-                    let pre_ws_log = pre_ws.display().to_string();
-                    match conversations::purge_threads(pre_ws) {
-                        Ok(stats) => {
-                            tracing::info!(
-                                pre_login_workspace = %pre_ws_log,
-                                threads = stats.thread_count,
-                                messages = stats.message_count,
-                                "[credentials] purged pre-login conversation threads after first session activation"
-                            );
-                            logs.push(format!(
-                                "purged pre-login conversation history (threads={}, messages={})",
-                                stats.thread_count, stats.message_count
-                            ));
-                        }
-                        Err(e) => {
-                            tracing::debug!(
-                                error = %e,
-                                pre_login_workspace = %pre_ws_log,
-                                "[credentials] pre-login conversation purge skipped (non-fatal)"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Reload config so it picks up the newly activated user directory.
-    // This ensures auth-profiles.json, encryption key, etc. are written
-    // to the user-scoped location.
-    let effective_config = if resolved_user_id.is_some() {
-        match crate::openhuman::config::load_config_with_timeout().await {
-            Ok(c) => c,
-            Err(_) => config.clone(),
-        }
-    } else {
-        config.clone()
-    };
-
-    let auth = AuthService::from_config(&effective_config);
-    let profile = auth
-        .store_provider_token(
-            APP_SESSION_PROVIDER,
-            DEFAULT_AUTH_PROFILE_NAME,
-            trimmed_token,
-            metadata,
-            true,
-        )
-        .map_err(|e| e.to_string())?;
-
-    logs.push("session stored".to_string());
-
-    // Now that active_user.toml exists and config.workspace_dir resolves to
-    // the per-user path, seed the subconscious defaults and spawn the
-    // heartbeat loop. Idempotent — no-op on subsequent logins of the same
-    // process. Bootstrap failures are non-fatal: the session itself is
-    // already stored above, so we only warn.
-    if let Err(e) = crate::openhuman::subconscious::global::bootstrap_after_login().await {
-        tracing::warn!(error = %e, "[subconscious] post-login bootstrap failed");
-        logs.push(format!("subconscious bootstrap warning: {e}"));
-    } else {
-        logs.push("subconscious engine bootstrapped".to_string());
-    }
-
-    // Start all login-gated services (voice, autocomplete, screen
-    // intelligence, local AI). Uses the effective config so services see
-    // the user-scoped workspace directory.
-    start_login_gated_services(&effective_config).await;
-    logs.push("login-gated services started".to_string());
-
-    // Clear the scheduler-gate signed-out override now that a fresh JWT is
-    // in place. Workers that were sleeping in the paused poll loop will
-    // pick this up at their next iteration and resume LLM-bound work.
-    crate::openhuman::scheduler_gate::set_signed_out(false);
-
-    Ok(RpcOutcome::new(summarize_auth_profile(&profile), logs))
-}
-
-fn sanitize_stored_session_user(user: Option<serde_json::Value>) -> Option<serde_json::Value> {
-    match user {
-        Some(serde_json::Value::Object(map)) if map.is_empty() => None,
-        Some(serde_json::Value::Null) => None,
-        other => other,
-    }
-}
-
 pub async fn clear_session(config: &Config) -> Result<RpcOutcome<serde_json::Value>, String> {
-    // Flip the scheduler-gate override first so any background worker that
-    // is mid-iteration (or wakes up while we tear down) stalls at its next
-    // `wait_for_capacity()` call instead of firing requests at a backend
-    // we're about to invalidate. Idempotent.
-    crate::openhuman::scheduler_gate::set_signed_out(true);
-
-    let auth = AuthService::from_config(config);
-    let removed = auth
-        .remove_profile(APP_SESSION_PROVIDER, DEFAULT_AUTH_PROFILE_NAME)
-        .map_err(|e| e.to_string())?;
-
     // Clear the active user marker so subsequent config loads fall back to the
     // default (unauthenticated) openhuman directory.
     if let Ok(root_dir) = default_root_openhuman_dir() {
@@ -312,93 +199,26 @@ pub async fn clear_session(config: &Config) -> Result<RpcOutcome<serde_json::Val
     crate::openhuman::subconscious::global::reset_engine_for_user_switch().await;
 
     Ok(RpcOutcome::single_log(
-        json!({ "removed": removed }),
-        "session cleared",
+        json!({ "removed": false }),
+        "local session state cleared",
     ))
 }
 
 pub async fn auth_get_state(
-    config: &Config,
+    _config: &Config,
 ) -> Result<RpcOutcome<super::responses::AuthStateResponse>, String> {
-    let state = build_session_state(config)?;
+    let state = AuthStateResponse {
+        is_authenticated: true,
+        user_id: None,
+        user: Some(json!({
+            "user_id": null,
+            "email": null,
+            "display_name": "Local User",
+            "source": "local",
+        })),
+        profile_id: None,
+    };
     Ok(RpcOutcome::single_log(state, "session state fetched"))
-}
-
-pub async fn auth_get_session_token_json(
-    config: &Config,
-) -> Result<RpcOutcome<serde_json::Value>, String> {
-    let token = get_session_token(config)?;
-    Ok(RpcOutcome::single_log(
-        json!({ "token": token }),
-        "session token fetched",
-    ))
-}
-
-pub async fn auth_get_me(config: &Config) -> Result<RpcOutcome<serde_json::Value>, String> {
-    let api_url = effective_backend_api_url(&config.api_url);
-    let token = get_session_token(config)?.ok_or_else(|| "session JWT required".to_string())?;
-    let client = BackendOAuthClient::new(&api_url).map_err(|e| e.to_string())?;
-    let user = client
-        .fetch_current_user(&token)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(RpcOutcome::single_log(user, "current user fetched"))
-}
-
-pub async fn consume_login_token(
-    config: &Config,
-    login_token: &str,
-) -> Result<RpcOutcome<serde_json::Value>, String> {
-    let token = login_token.trim();
-    if token.is_empty() {
-        return Err("loginToken is required".to_string());
-    }
-
-    let api_url = effective_backend_api_url(&config.api_url);
-    let client = BackendOAuthClient::new(&api_url).map_err(|e| e.to_string())?;
-    let jwt_token = client
-        .consume_login_token(token)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(RpcOutcome::new(
-        serde_json::json!({ "jwtToken": jwt_token }),
-        vec![
-            format!(
-                "login token consumed via POST /telegram/login-tokens/:token/consume on {}",
-                api_url.trim_end_matches('/')
-            ),
-            "session JWT received".to_string(),
-        ],
-    ))
-}
-
-pub async fn auth_create_channel_link_token(
-    config: &Config,
-    channel: &str,
-) -> Result<RpcOutcome<serde_json::Value>, String> {
-    let channel = channel.trim();
-    if channel.is_empty() {
-        return Err("channel is required".to_string());
-    }
-    let channel = channel.to_lowercase();
-    if !matches!(channel.as_str(), "telegram" | "discord") {
-        return Err(format!("unsupported channel: {channel}"));
-    }
-
-    let api_url = effective_backend_api_url(&config.api_url);
-    let token = get_session_token(config)?.ok_or_else(|| "session JWT required".to_string())?;
-    let client = BackendOAuthClient::new(&api_url).map_err(|e| e.to_string())?;
-    let payload = client
-        .create_channel_link_token(&channel, &token)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(RpcOutcome::single_log(
-        payload,
-        "channel link token created",
-    ))
 }
 
 pub async fn store_provider_credentials(
@@ -473,7 +293,6 @@ pub async fn list_provider_credentials(
     let mut items = profiles
         .profiles
         .values()
-        .filter(|profile| profile.provider != APP_SESSION_PROVIDER)
         .filter(|profile| {
             provider_filter
                 .as_ref()
@@ -507,7 +326,6 @@ pub async fn list_provider_credentials_by_prefix(
     let mut items = profiles
         .profiles
         .values()
-        .filter(|profile| profile.provider != APP_SESSION_PROVIDER)
         .filter(|profile| profile.provider.starts_with(prefix))
         .map(summarize_auth_profile)
         .collect::<Vec<_>>();
@@ -522,10 +340,7 @@ pub async fn list_provider_credentials_by_prefix(
 /// Provider slot for the user-provided Composio API key when running in
 /// direct mode (BYO key).
 ///
-/// Parallel to [`APP_SESSION_PROVIDER`] but completely independent — the
-/// app-session JWT authenticates the user against `api.tinyhumans.ai`,
-/// while this slot authenticates the user against
-/// `backend.composio.dev`. Stored via the same
+/// Stored via the same
 /// [`super::profiles::AuthProfilesStore`] backend (encrypted on disk
 /// when `secrets.encrypt = true`).
 pub const COMPOSIO_DIRECT_PROVIDER: &str = "composio-direct";
@@ -743,7 +558,3 @@ pub fn clear_composio_webhook_secret(config: &Config) -> Result<bool, String> {
     auth.remove_profile(COMPOSIO_WEBHOOK_SECRET_PROVIDER, DEFAULT_AUTH_PROFILE_NAME)
         .map_err(|e| e.to_string())
 }
-
-#[cfg(test)]
-#[path = "ops_tests.rs"]
-mod tests;

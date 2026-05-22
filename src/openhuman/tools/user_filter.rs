@@ -13,7 +13,6 @@ const TOOL_ID_TO_RUST_NAMES: &[(&str, &[&str])] = &[
     ("browser_open", &["browser_open"]),
     ("browser", &["browser"]),
     ("http_request", &["http_request"]),
-    ("web_search", &["web_search_tool"]),
     ("memory_store", &["memory_store"]),
     ("memory_recall", &["memory_recall"]),
     ("memory_forget", &["memory_forget"]),

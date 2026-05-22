@@ -3,22 +3,19 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use log::{debug, warn};
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
-use reqwest::{header::AUTHORIZATION, Client, Method, Url};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tempfile::NamedTempFile;
 
-use crate::api::config::effective_backend_api_url;
-use crate::api::jwt::{bearer_authorization_value, get_session_token};
 use crate::openhuman::autocomplete::AutocompleteStatus;
 use crate::openhuman::config::rpc as config_rpc;
 use crate::openhuman::config::Config;
-use crate::openhuman::credentials::session_support::build_session_state;
+use crate::openhuman::credentials::responses::AuthStateResponse;
 use crate::openhuman::inference::LocalAiStatus;
 use crate::openhuman::screen_intelligence::AccessibilityStatus;
 use crate::openhuman::service::{ServiceState, ServiceStatus};
@@ -26,15 +23,11 @@ use crate::rpc::RpcOutcome;
 
 const LOG_PREFIX: &str = "[app_state]";
 const APP_STATE_FILENAME: &str = "app-state.json";
-const CURRENT_USER_REFRESH_TTL: Duration = Duration::from_secs(5);
 static APP_STATE_FILE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static CURRENT_USER_CACHE: Lazy<Mutex<Option<CachedCurrentUser>>> = Lazy::new(|| Mutex::new(None));
 
 #[derive(Debug, Clone)]
 struct CachedCurrentUser {
-    api_base: String,
-    token: String,
-    fetched_at: Instant,
     user: Value,
 }
 
@@ -247,115 +240,18 @@ fn save_stored_app_state(config: &Config, state: &StoredAppState) -> Result<(), 
     save_stored_app_state_unlocked(config, state)
 }
 
-fn build_client() -> Result<Client, String> {
-    Client::builder()
-        .use_rustls_tls()
-        .http1_only()
-        .timeout(Duration::from_secs(30))
-        .connect_timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| format!("failed to build HTTP client: {e}"))
+fn local_current_user() -> Value {
+    json!({
+        "user_id": null,
+        "email": null,
+        "display_name": "Local User",
+        "source": "local",
+    })
 }
 
-fn resolve_base(config: &Config) -> Result<Url, String> {
-    let base = effective_backend_api_url(&config.api_url);
-    let mut parsed =
-        Url::parse(base.trim()).map_err(|e| format!("invalid api_url '{}': {e}", base))?;
-    if !parsed.path().ends_with('/') && parsed.path() != "/" {
-        let normalized = format!("{}/", parsed.path());
-        parsed.set_path(&normalized);
-    }
-    Ok(parsed)
-}
-
-async fn fetch_current_user(config: &Config, token: &str) -> Result<Option<Value>, String> {
-    let client = build_client()?;
-    let base = resolve_base(config)?;
-    let url = base
-        .join("auth/me")
-        .map_err(|e| format!("build URL failed: {e}"))?;
-    let response = client
-        .request(Method::GET, url.clone())
-        .header(AUTHORIZATION, bearer_authorization_value(token))
-        .send()
-        .await
-        .map_err(|e| format!("request failed: {e}"))?;
-    let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|e| format!("failed to read backend response body: {e}"))?;
-
-    debug!("{LOG_PREFIX} GET /auth/me -> {}", status);
-
-    if !status.is_success() {
-        warn!(
-            "{LOG_PREFIX} current user fetch failed: {} {}",
-            status, text
-        );
-        return Ok(None);
-    }
-
-    let raw: Value =
-        serde_json::from_str(&text).unwrap_or_else(|_| Value::String(text.to_string()));
-    let user = raw
-        .as_object()
-        .and_then(|obj| obj.get("data"))
-        .cloned()
-        .unwrap_or(raw);
-    Ok(Some(user))
-}
-
-fn sanitize_snapshot_user(user: Option<Value>) -> Option<Value> {
-    match user {
-        Some(Value::Object(map)) if map.is_empty() => None,
-        Some(Value::Null) => None,
-        other => other,
-    }
-}
-
-async fn fetch_current_user_cached(config: &Config, token: &str) -> Result<Option<Value>, String> {
-    let api_base = effective_backend_api_url(&config.api_url)
-        .trim()
-        .trim_end_matches('/')
-        .to_string();
-
-    {
-        let cache = CURRENT_USER_CACHE.lock();
-        if let Some(entry) = cache.as_ref() {
-            if entry.api_base == api_base
-                && entry.token == token
-                && entry.fetched_at.elapsed() < CURRENT_USER_REFRESH_TTL
-            {
-                debug!(
-                    "{LOG_PREFIX} using cached current user age_ms={}",
-                    entry.fetched_at.elapsed().as_millis()
-                );
-                return Ok(Some(entry.user.clone()));
-            }
-        }
-    }
-
-    let fetched = sanitize_snapshot_user(fetch_current_user(config, token).await?);
-
+fn cache_local_current_user(user: &Value) {
     let mut cache = CURRENT_USER_CACHE.lock();
-    match fetched.clone() {
-        Some(user) => {
-            debug!("{LOG_PREFIX} refreshed current user from backend");
-            *cache = Some(CachedCurrentUser {
-                api_base,
-                token: token.to_string(),
-                fetched_at: Instant::now(),
-                user,
-            });
-        }
-        None => {
-            debug!("{LOG_PREFIX} backend returned empty current user; clearing cache");
-            *cache = None;
-        }
-    }
-
-    Ok(fetched)
+    *cache = Some(CachedCurrentUser { user: user.clone() });
 }
 
 /// Synchronous, network-free peek at the cached `auth_get_me` response,
@@ -446,21 +342,16 @@ async fn build_runtime_snapshot(config: &Config) -> RuntimeSnapshot {
 
 pub async fn snapshot() -> Result<RpcOutcome<AppStateSnapshot>, String> {
     let config = config_rpc::load_config_with_timeout().await?;
-    let mut auth = build_session_state(&config)?;
-    let session_token = get_session_token(&config)?;
-    let stored_user = sanitize_snapshot_user(auth.user.clone());
-    let current_user = if let Some(token) = session_token.clone().filter(|t| !t.trim().is_empty()) {
-        match fetch_current_user_cached(&config, &token).await {
-            Ok(fresh_user) => fresh_user.or(stored_user.clone()),
-            Err(error) => {
-                warn!("{LOG_PREFIX} current user refresh failed; using stored snapshot fallback: {error}");
-                stored_user.clone()
-            }
-        }
-    } else {
-        stored_user.clone()
+    let current_user = Some(local_current_user());
+    if let Some(user) = current_user.as_ref() {
+        cache_local_current_user(user);
+    }
+    let auth = AuthStateResponse {
+        is_authenticated: true,
+        user_id: None,
+        user: current_user.clone(),
+        profile_id: None,
     };
-    auth.user = current_user.clone();
     let local_state = load_stored_app_state(&config)?;
     let runtime = build_runtime_snapshot(&config).await;
 
@@ -480,7 +371,7 @@ pub async fn snapshot() -> Result<RpcOutcome<AppStateSnapshot>, String> {
     Ok(RpcOutcome::new(
         AppStateSnapshot {
             auth,
-            session_token,
+            session_token: None,
             current_user,
             onboarding_completed: config.onboarding_completed,
             chat_onboarding_completed: config.chat_onboarding_completed,
@@ -524,7 +415,3 @@ pub async fn update_local_state(
         vec!["core local app state updated".to_string()],
     ))
 }
-
-#[cfg(test)]
-#[path = "ops_tests.rs"]
-mod tests;

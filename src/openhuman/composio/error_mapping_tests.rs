@@ -20,7 +20,7 @@ fn classifies_slack_rate_limit() {
 
 #[test]
 fn embedded_provider_failure_in_502_body_is_not_gateway() {
-    let raw = "Backend returned 502 Bad Gateway for POST https://api.example.com/agent-integrations/composio/execute: \
+    let raw = "Provider returned 502 Bad Gateway for POST https://api.example.com/integrations/composio/execute: \
                timeMax must be RFC 3339 timestamp";
     let mapped = remap_transport_error("GOOGLECALENDAR_EVENTS_LIST", raw);
     assert!(

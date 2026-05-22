@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // Hindi (हिन्दी) chunk 5/5. Translated from chunks/en-5.ts.
 const hi5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'अपग्रेड करें',
-  'settings.billing.subscription.waiting': 'इंतज़ार हो रहा है',
-  'settings.billing.subscription.waitingPayment': 'पेमेंट का इंतज़ार',
   'settings.composio.apiKeyDesc': 'इस डिवाइस पर वर्तमान में एक Composio API कुंजी संग्रहीत है।',
   'settings.composio.apiKeyLabel': 'Composio API कुंजी',
   'settings.composio.apiKeyStored': 'API कुंजी संग्रहीत',
@@ -358,22 +354,6 @@ const hi5: TranslationMap = {
   'skills.uninstall.title': 'अनइंस्टॉल',
   'skills.uninstall.uninstallBtn': 'अनइंस्टॉल',
   'skills.uninstall.uninstalling': 'अनइंस्टॉल हो रहा है…',
-  'upsell.global.limitMessage': 'जारी रखने के लिए अपना प्लान अपग्रेड करें या क्रेडिट टॉप अप करें',
-  'upsell.global.limitTitle': 'आप',
-  'upsell.global.nearLimitMessage':
-    'आपने अपनी उपयोग सीमा का {pct}% इस्तेमाल कर लिया है। ज़्यादा सीमा के लिए अपग्रेड करें।',
-  'upsell.global.nearLimitTitle': 'उपयोग सीमा के करीब',
-  'upsell.usageLimit.bodyBudget':
-    'आपने अपनी साप्ताहिक सीमा प्राप्त कर ली है।{reset} सीमाओं से बचने के लिए अपनी योजना अपग्रेड करें या क्रेडिट टॉप अप करें।',
-  'upsell.usageLimit.bodyRate':
-    'आपने अपनी 10-घंटे की इन्फ़रेंस दर सीमा प्राप्त कर ली है।{reset} उच्च सीमा के लिए अपग्रेड करें।',
-  'upsell.usageLimit.heading': 'उपयोग सीमा पहुँच गई',
-  'upsell.usageLimit.notNow': 'अभी नहीं',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'यह {time} रीसेट होती है।',
-  'upsell.usageLimit.upgradePlan': 'प्लान अपग्रेड करें',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': 'चलिए शुरू करें!',
   'walkthrough.tooltip.next': 'अगला →',
   'walkthrough.tooltip.skip': 'टूर छोड़ें',

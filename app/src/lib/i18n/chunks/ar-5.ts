@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // Arabic (العربية) chunk 5/5. Translated from chunks/en-5.ts.
 const ar5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'ترقية',
-  'settings.billing.subscription.waiting': 'انتظار',
-  'settings.billing.subscription.waitingPayment': 'في انتظار الدفع',
   'settings.composio.apiKeyDesc': 'يتم حاليًا تخزين مفتاح Composio API على هذا الجهاز.',
   'settings.composio.apiKeyLabel': 'مفتاح Composio API',
   'settings.composio.apiKeyStored': 'تم تخزين مفتاح API',
@@ -352,22 +348,6 @@ const ar5: TranslationMap = {
   'skills.uninstall.title': 'إلغاء التثبيت',
   'skills.uninstall.uninstallBtn': 'إلغاء التثبيت',
   'skills.uninstall.uninstalling': 'جارٍ إلغاء التثبيت…',
-  'upsell.global.limitMessage': 'قم بترقية خطتك أو أضف رصيدًا للمتابعة',
-  'upsell.global.limitTitle': 'أنت',
-  'upsell.global.nearLimitMessage':
-    'لقد استخدمت {pct}% من حد الاستخدام. قم بالترقية للحصول على حدود أعلى.',
-  'upsell.global.nearLimitTitle': 'الاقتراب من حد الاستخدام',
-  'upsell.usageLimit.bodyBudget':
-    'لقد وصلت إلى حدّك الأسبوعي.{reset} قم بترقية خطتك أو شحن الرصيد لتجنّب الحدود.',
-  'upsell.usageLimit.bodyRate':
-    'لقد وصلت إلى حدّ معدّل الاستدلال لـ 10 ساعات.{reset} قم بالترقية للحصول على حدود أعلى.',
-  'upsell.usageLimit.heading': 'تم الوصول إلى حد الاستخدام',
-  'upsell.usageLimit.notNow': 'ليس الآن',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'يُعاد التعيين {time}.',
-  'upsell.usageLimit.upgradePlan': 'ترقية الخطة',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': 'هيا بنا!',
   'walkthrough.tooltip.next': 'التالي →',
   'walkthrough.tooltip.skip': 'تخطّي الجولة',

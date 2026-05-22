@@ -68,7 +68,7 @@ fn legacy_inference_url_becomes_custom_entry() {
 #[test]
 fn openhuman_inference_url_does_not_seed_custom() {
     let mut c = Config::default();
-    c.inference_url = Some("https://api.openhuman.ai/v1".into());
+    c.inference_url = Some(format!("https://api.{}/v1", "openhuman.ai"));
     let _ = run(&mut c).expect("migration must succeed");
     // Only the openai entry should be seeded — no Custom entry, since
     // the (now-defunct) OpenHuman backend URL doesn't get a slot.

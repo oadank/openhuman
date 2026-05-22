@@ -314,7 +314,6 @@ const en3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'Skip for now',
   'app.openhumanLink.telegramUnavailable': 'Telegram unavailable',
   'app.openhumanLink.title.accounts': 'Connect your apps',
-  'app.openhumanLink.title.billing': 'Billing & credits',
   'app.openhumanLink.title.discord': 'Join the community',
   'app.openhumanLink.title.messaging': 'Connect a chat channel',
   'app.openhumanLink.title.notifications': 'Allow notifications',

@@ -47,17 +47,6 @@ named = [
     "plan_exit",
     "web_fetch",
     "memory_recall",
-    "web_search_tool",
-    # Grounded research + market-data lookups so plans can be anchored in
-    # real numbers (stock/crypto prices) and current web context, not just
-    # whatever the model happens to remember.
-    "parallel_search",
-    "parallel_chat",
-    "parallel_research",
-    "stock_quote",
-    "stock_exchange_rate",
-    "stock_crypto_series",
-    "stock_commodity",
     "composio_list_toolkits",
     "composio_list_connections",
     "composio_list_tools",

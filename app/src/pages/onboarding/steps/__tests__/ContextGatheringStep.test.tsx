@@ -57,7 +57,7 @@ describe('ContextGatheringStep', () => {
     });
   });
 
-  it('runs Gmail -> save pipeline with Apify disabled and auto-navigates', async () => {
+  it('runs Gmail -> save pipeline with profile scrape disabled and auto-navigates', async () => {
     const onNext = vi.fn().mockResolvedValue(undefined);
     callCoreRpc.mockImplementation(async (req: { method: string; params: unknown }) => {
       if (req.method === 'openhuman.tools_composio_execute') {
@@ -84,9 +84,6 @@ describe('ContextGatheringStep', () => {
 
     const calls = callCoreRpc.mock.calls.map((c: Array<{ method: string }>) => c[0].method);
     expect(calls).toEqual(['openhuman.tools_composio_execute', 'openhuman.learning_save_profile']);
-    // Apify scrape must not be called — it is disabled during profile build.
-    expect(calls).not.toContain('openhuman.tools_apify_linkedin_scrape');
-
     const saveCall = callCoreRpc.mock.calls.find(
       (c: Array<{ method: string }>) => c[0].method === 'openhuman.learning_save_profile'
     );
@@ -216,11 +213,7 @@ describe('ContextGatheringStep', () => {
         (c: Array<{ method: string }>) => c[0].method === 'openhuman.learning_save_profile'
       );
       expect(saveCalls.length).toBe(1);
-      // Apify must never have been invoked.
-      const apifyCalls = callCoreRpc.mock.calls.filter(
-        (c: Array<{ method: string }>) => c[0].method === 'openhuman.tools_apify_linkedin_scrape'
-      );
-      expect(apifyCalls.length).toBe(0);
+      expect(callCoreRpc).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -255,9 +248,6 @@ describe('ContextGatheringStep', () => {
           successful: true,
           data: { messages: [{ messageText: 'https://www.linkedin.com/in/jane-doe' }] },
         };
-      }
-      if (req.method === 'openhuman.tools_apify_linkedin_scrape') {
-        return { data: { name: 'Jane Doe' }, markdown: '# Jane Doe\n\nFounder at Acme.' };
       }
       if (req.method === 'openhuman.learning_save_profile') {
         throw new Error('disk full');

@@ -61,7 +61,7 @@ function setSocketStatus(status: string) {
 //    Socket.IO server accepts every connection unconditionally and
 //    doesn't validate the token).
 // 2. The `socket_connect_with_session` RPC was the backend-alphahuman
-//    handshake; the OpenHuman backend is dead, so calling it now
+//    handshake; the hosted app socket is gone, so calling it now
 //    logs `unknown_method` and spams console errors. The provider
 //    no longer calls it.
 

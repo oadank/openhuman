@@ -98,15 +98,6 @@ export const TOOL_CATALOG: ToolDefinition[] = [
     defaultEnabled: false,
     rustToolNames: ['http_request'],
   },
-  {
-    id: 'web_search',
-    displayName: 'Web Search',
-    description: 'Search the web for information.',
-    category: 'Web',
-    defaultEnabled: true,
-    rustToolNames: ['web_search_tool'],
-  },
-
   // Memory
   {
     id: 'memory_store',

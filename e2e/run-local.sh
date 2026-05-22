@@ -7,8 +7,8 @@
 #
 # Usage:
 #   ./e2e/run-local.sh                                # smoke spec
-#   ./e2e/run-local.sh mega-flow                      # mega-flow spec
-#   ./e2e/run-local.sh smoke mega-flow                # both, in order
+#   ./e2e/run-local.sh navigation                     # navigation spec
+#   ./e2e/run-local.sh smoke navigation               # both, in order
 #   ./e2e/run-local.sh all                            # full suite
 #   ./e2e/run-local.sh shell                          # interactive shell
 #   ./e2e/run-local.sh build                          # rebuild CEF bundle only
@@ -36,7 +36,6 @@ run_spec() {
   local spec
   case "$name" in
     smoke)      spec="test/e2e/specs/smoke.spec.ts" ;;
-    mega-flow)  spec="test/e2e/specs/mega-flow.spec.ts" ;;
     *)          spec="test/e2e/specs/${name}.spec.ts" ;;
   esac
   echo "[run-local] === $name ($spec) ==="

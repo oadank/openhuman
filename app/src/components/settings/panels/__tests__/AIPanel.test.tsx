@@ -8,7 +8,6 @@ import {
   saveAISettings,
   setCloudProviderKey,
 } from '../../../../services/api/aiSettingsApi';
-import { creditsApi } from '../../../../services/api/creditsApi';
 import { renderWithProviders } from '../../../../test/test-utils';
 import {
   openhumanHeartbeatSettingsGet,
@@ -59,23 +58,10 @@ vi.mock('../../../../utils/tauriCommands/heartbeat', () => ({
   openhumanHeartbeatTickNow: vi.fn(),
 }));
 
-vi.mock('../../../../services/api/creditsApi', () => ({
-  creditsApi: { getTeamUsage: vi.fn(), getTransactions: vi.fn() },
-}));
-
 vi.mock('../../../../lib/composio/composioApi', () => ({ listConnections: vi.fn() }));
 
 const baseSettings = {
-  cloudProviders: [
-    {
-      id: 'p_oh_x',
-      slug: 'openhuman',
-      label: 'OpenHuman',
-      endpoint: 'https://api.openhuman.ai/v1',
-      auth_style: 'openhuman_jwt' as const,
-      has_api_key: false,
-    },
-  ],
+  cloudProviders: [],
   routing: {
     chat: { kind: 'openhuman' as const },
     reasoning: { kind: 'openhuman' as const },
@@ -103,44 +89,6 @@ const baseHeartbeatSettings = {
   max_calendar_connections_per_tick: 2,
   reminder_lookahead_minutes: 30,
 };
-
-const baseUsage = {
-  remainingUsd: 1.5,
-  cycleBudgetUsd: 10,
-  cycleLimit5hr: 0.12,
-  cycleLimit7day: 8.5,
-  fiveHourCapUsd: 1,
-  fiveHourResetsAt: '2026-05-17T08:00:00.000Z',
-  cycleStartDate: '2026-05-14T00:00:00.000Z',
-  cycleEndsAt: '2026-05-21T00:00:00.000Z',
-};
-
-const baseTransactions = [
-  {
-    id: 'older',
-    type: 'SPEND' as const,
-    action: 'SPEND:USAGE_DEDUCTION:USER',
-    amountUsd: -0.25,
-    balanceAfterUsd: 9.75,
-    createdAt: '2026-05-17T01:00:00.000Z',
-  },
-  {
-    id: 'earn',
-    type: 'EARN' as const,
-    action: 'TOPUP',
-    amountUsd: 1,
-    balanceAfterUsd: 10.75,
-    createdAt: '2026-05-17T02:00:00.000Z',
-  },
-  {
-    id: 'latest',
-    type: 'SPEND' as const,
-    action: 'HEARTBEAT',
-    amountUsd: -0.5,
-    balanceAfterUsd: 9.25,
-    createdAt: '2026-05-17T03:00:00.000Z',
-  },
-];
 
 const baseConnections = [
   { id: 'cal-1', toolkit: 'googlecalendar', status: 'ACTIVE' },
@@ -173,11 +121,6 @@ describe('AIPanel', () => {
         },
       },
       logs: [],
-    });
-    vi.mocked(creditsApi.getTeamUsage).mockResolvedValue(baseUsage);
-    vi.mocked(creditsApi.getTransactions).mockResolvedValue({
-      transactions: baseTransactions,
-      total: baseTransactions.length,
     });
     vi.mocked(listComposioConnections).mockResolvedValue({ connections: baseConnections });
   });
@@ -429,13 +372,13 @@ describe('AIPanel', () => {
     expect(screen.queryByRole('switch', { name: /Disconnect OpenAI/i })).not.toBeInTheDocument();
   });
 
-  it('renders background loop diagnostics with newest spend row and budget math', async () => {
+  it('renders background loop diagnostics with local schedule estimates', async () => {
     renderWithProviders(<AIPanel />);
 
     await waitFor(() => expect(screen.getByText('Background loops')).toBeInTheDocument());
 
     expect(screen.getByText('Heartbeat controls')).toBeInTheDocument();
-    expect(screen.getByText('Recent usage ledger')).toBeInTheDocument();
+    expect(screen.getByText('Loop schedule')).toBeInTheDocument();
     expect(screen.getByText('Loop map')).toBeInTheDocument();
     expect(screen.getByText('Heartbeat planner')).toBeInTheDocument();
     expect(screen.getByText('Subconscious tick')).toBeInTheDocument();
@@ -443,19 +386,10 @@ describe('AIPanel', () => {
     expect(screen.getByText('Reflection rebuild')).toBeInTheDocument();
     expect(screen.getByText('Composio sync')).toBeInTheDocument();
 
-    expect(screen.getByText('Week budget')).toBeInTheDocument();
-    expect(screen.getByText('$10.0000')).toBeInTheDocument();
-    expect(screen.getByText('Week remaining')).toBeInTheDocument();
-    expect(screen.getByText('$1.5000')).toBeInTheDocument();
-    expect(screen.getByText('Avg spend row')).toBeInTheDocument();
     expect(screen.getByText('Bg API reads')).toBeInTheDocument();
     expect(screen.getByText('Bg wakeups')).toBeInTheDocument();
+    expect(screen.getByText('Active integrations')).toBeInTheDocument();
 
-    expect(screen.getByText('Rows left')).toBeInTheDocument();
-    expect(screen.getByText('Rows per full week budget')).toBeInTheDocument();
-    expect(screen.getByText('Sample burn rate')).toBeInTheDocument();
-    expect(screen.getByText('Projected empty')).toBeInTheDocument();
-    expect(screen.getByText('API reads per $ remaining')).toBeInTheDocument();
     expect(screen.getByText('Loop call budget')).toBeInTheDocument();
     expect(screen.getByText('Calendar fanout cap')).toBeInTheDocument();
     expect(screen.getByText('Subconscious model calls')).toBeInTheDocument();
@@ -465,9 +399,6 @@ describe('AIPanel', () => {
     expect(screen.getByText(/3 Composio read call\(s\)\/tick/)).toBeInTheDocument();
     expect(screen.getByText(/1 calendar link\(s\) over cap skipped/)).toBeInTheDocument();
     expect(screen.getByText(/2\/3 conn\/tick/)).toBeInTheDocument();
-    expect(screen.getByText('HEARTBEAT')).toBeInTheDocument();
-    expect(screen.getByText('SPEND:USAGE_DEDUCTION:USER')).toBeInTheDocument();
-    expect(screen.getByText(/Latest spend: \$0\.5000/)).toBeInTheDocument();
   });
 
   it('patches heartbeat controls and runs a manual planner tick', async () => {
@@ -532,7 +463,7 @@ describe('AIPanel', () => {
     await waitFor(() => expect(screen.getByText(/Planner: 3 source events/)).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
     await waitFor(() => expect(vi.mocked(openhumanHeartbeatSettingsGet)).toHaveBeenCalled());
   });
 

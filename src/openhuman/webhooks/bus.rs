@@ -6,10 +6,8 @@
 //! This decouples the socket module from webhook routing logic.
 
 use crate::core::event_bus::{publish_global, DomainEvent, EventHandler};
-use crate::openhuman::socket::global_socket_manager;
 use crate::openhuman::webhooks::WebhookResponseData;
 use async_trait::async_trait;
-use serde_json::json;
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -76,8 +74,8 @@ impl EventHandler for WebhookRequestSubscriber {
             correlation_id,
         );
 
-        // Retrieve the router from the global socket manager.
-        let router = global_socket_manager().and_then(|mgr| mgr.webhook_router());
+        // Retrieve the router from the local webhook runtime.
+        let router = crate::openhuman::webhooks::global_webhook_router();
 
         // Look up the registration for this tunnel.
         let registration = router.as_ref().and_then(|r| r.registration(&tunnel_uuid));
@@ -161,18 +159,6 @@ impl EventHandler for WebhookRequestSubscriber {
                                 )
                             }
                         };
-                        // Emit response from the spawned task.
-                        if let Some(mgr) = global_socket_manager() {
-                            let response_data = serde_json::json!({
-                                "correlationId": resp.correlation_id,
-                                "statusCode": resp.status_code,
-                                "headers": resp.headers,
-                                "body": resp.body,
-                            });
-                            if let Err(e) = mgr.emit("webhook:response", response_data).await {
-                                tracing::error!("[webhook] failed to emit spawned response: {}", e);
-                            }
-                        }
                         if let Some(e) = err {
                             tracing::warn!("[webhook] agent trigger error: {}", e);
                         }
@@ -251,21 +237,6 @@ impl EventHandler for WebhookRequestSubscriber {
             elapsed_ms: started_at.elapsed().as_millis() as u64,
             error: response_error.clone(),
         });
-
-        // Emit response back through the socket.
-        if let Some(mgr) = global_socket_manager() {
-            let response_data = json!({
-                "correlationId": response.correlation_id,
-                "statusCode": response.status_code,
-                "headers": response.headers,
-                "body": response.body,
-            });
-            if let Err(e) = mgr.emit("webhook:response", response_data).await {
-                tracing::error!("[webhook] failed to emit response via socket: {}", e);
-            }
-        } else {
-            tracing::error!("[webhook] no socket manager available to emit response");
-        }
 
         tracing::info!(
             "[webhook] {} {} → status={}, skill={:?}, tunnel={} ({}ms)",

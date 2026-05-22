@@ -42,27 +42,17 @@ pub struct SyncTriggerResponse {
     pub connections_synced: usize,
 }
 
-/// Mode-aware connection listing shared by `sync_trigger_rpc` and
+/// Direct connection listing shared by `sync_trigger_rpc` and
 /// `sync_status_rpc`. Returns the raw `ComposioConnectionsResponse`
 /// (all toolkits, all statuses) — callers filter for slack + active
 /// downstream so each RPC owns its own filter semantics.
 ///
-/// Mirrors `composio::ops::composio_list_connections` (#1710): both
-/// the backend arm and the direct arm share the same downstream
-/// filtering, identical error wrapping, distinct log prefixes for
-/// debuggability.
 async fn list_slack_connections(config: &Config) -> Result<ComposioConnectionsResponse, String> {
-    let kind = create_composio_client(config)
+    let ComposioClientKind::Direct(direct) = create_composio_client(config)
         .map_err(|e| format!("[slack_ingest] list_connections: {e}"))?;
-    match kind {
-        ComposioClientKind::Backend(client) => client
-            .list_connections()
-            .await
-            .map_err(|e| format!("[slack_ingest] list_connections (backend) failed: {e:#}")),
-        ComposioClientKind::Direct(direct) => direct_list_connections(&direct)
-            .await
-            .map_err(|e| format!("[slack_ingest] list_connections (direct) failed: {e:#}")),
-    }
+    direct_list_connections(&direct)
+        .await
+        .map_err(|e| format!("[slack_ingest] list_connections failed: {e:#}"))
 }
 
 /// Run `SlackProvider::sync()` once for every active Slack connection

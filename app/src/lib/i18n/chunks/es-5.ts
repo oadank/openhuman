@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // Spanish (Español) chunk 5/5. Translated from chunks/en-5.ts.
 const es5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'Mejorar plan',
-  'settings.billing.subscription.waiting': 'Esperando',
-  'settings.billing.subscription.waitingPayment': 'Esperando pago',
   'settings.composio.apiKeyDesc':
     'Actualmente hay una clave API de Composio almacenada en este dispositivo.',
   'settings.composio.apiKeyLabel': 'Clave API de Composio',
@@ -359,22 +355,6 @@ const es5: TranslationMap = {
   'skills.uninstall.title': 'Desinstalar',
   'skills.uninstall.uninstallBtn': 'Desinstalar',
   'skills.uninstall.uninstalling': 'Desinstalando…',
-  'upsell.global.limitMessage': 'Mejora tu plan o recarga créditos para continuar',
-  'upsell.global.limitTitle': 'Tú',
-  'upsell.global.nearLimitMessage':
-    'Has usado el {pct}% de tu límite de uso. Mejora el plan para límites más altos.',
-  'upsell.global.nearLimitTitle': 'Acercándote al límite de uso',
-  'upsell.usageLimit.bodyBudget':
-    'Has alcanzado tu límite semanal.{reset} Mejora tu plan o recarga créditos para evitar límites.',
-  'upsell.usageLimit.bodyRate':
-    'Has alcanzado tu límite de inferencia de 10 horas.{reset} Mejora para obtener límites más altos.',
-  'upsell.usageLimit.heading': 'Límite de uso alcanzado',
-  'upsell.usageLimit.notNow': 'Ahora no',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'Se restablece {time}.',
-  'upsell.usageLimit.upgradePlan': 'Mejorar plan',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': '¡Vamos!',
   'walkthrough.tooltip.next': 'Siguiente →',
   'walkthrough.tooltip.skip': 'Omitir tour',

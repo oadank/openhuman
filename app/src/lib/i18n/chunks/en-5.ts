@@ -2,10 +2,6 @@ import type { TranslationMap } from '../types';
 
 // English chunk 5/5. Source of truth for translators.
 const en5: TranslationMap = {
-  'settings.billing.subscription.save': '{pct}',
-  'settings.billing.subscription.upgrade': 'Upgrade',
-  'settings.billing.subscription.waiting': 'Waiting',
-  'settings.billing.subscription.waitingPayment': 'Waiting payment',
   'settings.composio.apiKeyDesc': 'A Composio API key is currently stored on this device.',
   'settings.composio.apiKeyLabel': 'Composio API key',
   'settings.composio.apiKeyStored': 'API key stored',
@@ -357,22 +353,6 @@ const en5: TranslationMap = {
   'skills.uninstall.title': 'Uninstall',
   'skills.uninstall.uninstallBtn': 'Uninstall',
   'skills.uninstall.uninstalling': 'Uninstalling…',
-  'upsell.global.limitMessage': 'Upgrade your plan or top up credits to continue',
-  'upsell.global.limitTitle': 'You',
-  'upsell.global.nearLimitMessage':
-    "You've used {pct}% of your usage limit. Upgrade for higher limits.",
-  'upsell.global.nearLimitTitle': 'Approaching usage limit',
-  'upsell.usageLimit.bodyBudget':
-    "You've hit your weekly limit.{reset} Upgrade your plan or top up credits to avoid limits.",
-  'upsell.usageLimit.bodyRate':
-    "You've hit your 10-hour inference rate limit.{reset} Upgrade for higher limits.",
-  'upsell.usageLimit.heading': 'Usage Limit Reached',
-  'upsell.usageLimit.notNow': 'Not now',
-  'upsell.usageLimit.perWindow': '{amount}',
-  'upsell.usageLimit.planIncludes': '{plan}',
-  'upsell.usageLimit.resetsIn': 'It resets {time}.',
-  'upsell.usageLimit.upgradePlan': 'Upgrade plan',
-  'upsell.usageLimit.weeklyInference': '{amount}',
   'walkthrough.tooltip.letsGo': "Let's go!",
   'walkthrough.tooltip.next': 'Next →',
   'walkthrough.tooltip.skip': 'Skip tour',

@@ -25,7 +25,7 @@ struct CloudProviderUpdate {
     #[serde(default)]
     label: Option<String>,
     endpoint: String,
-    /// Auth style: "bearer" | "anthropic" | "openhuman_jwt" | "none".
+    /// Auth style: "bearer" | "anthropic" | "none".
     #[serde(default)]
     auth_style: Option<String>,
     /// Legacy field — tolerated on read for back-compat but not required.
@@ -38,13 +38,8 @@ struct CloudProviderUpdate {
 
 #[derive(Debug, Deserialize)]
 struct ModelSettingsUpdate {
-    /// OpenHuman product backend URL. Used for auth, billing, voice, and
-    /// every non-inference HTTP call. Almost always left blank so it
-    /// defaults to the canonical hosted backend.
-    api_url: Option<String>,
     /// Custom OpenAI-compatible LLM endpoint. When set together with
-    /// `api_key`, inference talks directly to this URL instead of routing
-    /// through the OpenHuman backend. Send an empty string to clear.
+    /// `api_key`, inference talks directly to this URL. Send an empty string to clear.
     inference_url: Option<String>,
     /// Optional API key for OpenAI-compatible backends. Stored verbatim in
     /// `config.toml` on the user's machine — see #1342 (local-first / pluggable
@@ -197,7 +192,6 @@ pub fn all_controller_schemas() -> Vec<ControllerSchema> {
         schemas("update_runtime_settings"),
         schemas("update_browser_settings"),
         schemas("update_local_ai_settings"),
-        schemas("resolve_api_url"),
         schemas("get_runtime_flags"),
         schemas("set_browser_allow_all"),
         schemas("workspace_onboarding_flag_exists"),
@@ -253,10 +247,6 @@ pub fn all_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: schemas("update_local_ai_settings"),
             handler: handle_update_local_ai_settings,
-        },
-        RegisteredController {
-            schema: schemas("resolve_api_url"),
-            handler: handle_resolve_api_url,
         },
         RegisteredController {
             schema: schemas("get_runtime_flags"),
@@ -354,15 +344,9 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "get_client_config" => ControllerSchema {
             namespace: "config",
             function: "get_client_config",
-            description: "Read safe client-facing config fields (api_url, feature flags). No secrets.",
+            description: "Read safe client-facing config fields and feature flags. No secrets.",
             inputs: vec![],
             outputs: vec![
-                FieldSchema {
-                    name: "api_url",
-                    ty: TypeSchema::Option(Box::new(TypeSchema::String)),
-                    comment: "Configured OpenHuman product backend URL, if any.",
-                    required: false,
-                },
                 FieldSchema {
                     name: "inference_url",
                     ty: TypeSchema::Option(Box::new(TypeSchema::String)),
@@ -398,10 +382,9 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "update_model_settings" => ControllerSchema {
             namespace: "config",
             function: "update_model_settings",
-            description: "Update model and backend connection settings, including a custom OpenAI-compatible backend (api_url + api_key).",
+            description: "Update model and direct provider connection settings.",
             inputs: vec![
-                optional_string("api_url", "OpenHuman product backend URL (auth/billing/voice). Almost always left blank; the inference URL is a separate `inference_url` field."),
-                optional_string("inference_url", "Custom OpenAI-compatible LLM endpoint. When set together with `api_key`, inference goes direct to this URL instead of the OpenHuman backend. Pass an empty string to clear."),
+                optional_string("inference_url", "Custom OpenAI-compatible LLM endpoint. When set together with `api_key`, inference goes direct to this URL. Pass an empty string to clear."),
                 optional_string("api_key", "Optional API key for the configured inference endpoint. Pass an empty string to clear a previously stored key."),
                 optional_string("default_model", "Default model id."),
                 FieldSchema {
@@ -563,18 +546,6 @@ pub fn schemas(function: &str) -> ControllerSchema {
                 ),
             ],
             outputs: vec![json_output("snapshot", "Updated config snapshot.")],
-        },
-        "resolve_api_url" => ControllerSchema {
-            namespace: "config",
-            function: "resolve_api_url",
-            description: "Resolve effective API base URL using config/env/default from core.",
-            inputs: vec![],
-            outputs: vec![FieldSchema {
-                name: "api_url",
-                ty: TypeSchema::String,
-                comment: "Resolved backend API URL.",
-                required: true,
-            }],
         },
         "get_runtime_flags" => ControllerSchema {
             namespace: "config",
@@ -889,7 +860,6 @@ fn handle_update_model_settings(params: Map<String, Value>) -> ControllerFuture 
     Box::pin(async move {
         let update = deserialize_params::<ModelSettingsUpdate>(params)?;
         let patch = config_rpc::ModelSettingsPatch {
-            api_url: update.api_url,
             inference_url: update.inference_url,
             api_key: update.api_key,
             default_model: update.default_model,
@@ -934,11 +904,10 @@ fn handle_update_model_settings(params: Map<String, Value>) -> ControllerFuture 
                             {
                                 "bearer" => AuthStyle::Bearer,
                                 "anthropic" => AuthStyle::Anthropic,
-                                "openhuman_jwt" | "openhumanjwt" => AuthStyle::OpenhumanJwt,
                                 "none" => AuthStyle::None,
                                 other => {
                                     return Err(format!(
-                                        "unknown auth_style '{}'; valid: bearer, anthropic, openhuman_jwt, none",
+                                        "unknown auth_style '{}'; valid: bearer, anthropic, none",
                                         other
                                     ))
                                 }
@@ -1058,10 +1027,6 @@ fn handle_update_local_ai_settings(params: Map<String, Value>) -> ControllerFutu
 
 fn handle_get_runtime_flags(_params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async { to_json(config_rpc::get_runtime_flags()) })
-}
-
-fn handle_resolve_api_url(_params: Map<String, Value>) -> ControllerFuture {
-    Box::pin(async { to_json(config_rpc::load_and_resolve_api_url().await?) })
 }
 
 fn handle_set_browser_allow_all(params: Map<String, Value>) -> ControllerFuture {

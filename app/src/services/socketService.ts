@@ -139,13 +139,13 @@ class SocketService {
     // Mirror backend Socket.IO state into the connectivity channel (#1527).
     store.dispatch(setBackend({ value: 'connecting' }));
 
-    const backendUrl = await resolveCoreSocketBaseUrl();
-    socketLog('Connecting to core socket', { userId: uid, backendUrl });
+    const coreSocketUrl = await resolveCoreSocketBaseUrl();
+    socketLog('Connecting to core socket', { userId: uid, coreSocketUrl });
 
     // Ensure we're not connecting to the wrong URL (Vite dev HMR port guard).
     // Reset the backend channel before returning so it doesn't stay stuck at
     // 'connecting'. (addresses @coderabbitai on socketService.ts:154-163)
-    if (backendUrl.includes('localhost:1420') || backendUrl.includes(':1420')) {
+    if (coreSocketUrl.includes('localhost:1420') || coreSocketUrl.includes(':1420')) {
       store.dispatch(
         setBackend({ value: 'disconnected', error: 'dev-server URL guard — not a real backend' })
       );
@@ -165,7 +165,7 @@ class SocketService {
       query: {},
     };
 
-    this.socket = io(backendUrl, socketOptions);
+    this.socket = io(coreSocketUrl, socketOptions);
 
     // Flush any listeners that were registered before the socket existed.
     if (this.pendingListeners.length > 0) {
@@ -251,7 +251,7 @@ class SocketService {
     this.socket.on('channel:connection-updated', handleChannelConnectionUpdated);
     this.socket.on('channel_connection_updated', handleChannelConnectionUpdated);
 
-    // Core-side session expiry (401 from the OpenHuman backend or jsonrpc).
+    // Core-side session expiry reported by jsonrpc.
     // The server has already published SessionExpired on its event bus,
     // the credentials subscriber has cleared the JWT, and the scheduler
     // gate is flipped to signed-out. All the UI needs to do is mirror

@@ -40,18 +40,8 @@ use crate::openhuman::tools::traits::{PermissionLevel, Tool, ToolCategory, ToolR
 
 /// A single Composio action exposed as a first-class tool.
 pub struct ComposioActionTool {
-    /// Held instead of a pre-baked [`super::client::ComposioClient`] so
-    /// the [`crate::openhuman::config::ComposioConfig::mode`] toggle is
-    /// honoured on every invocation.
-    ///
-    /// Pre-fix this field was `client: ComposioClient`, which captured
-    /// the backend-bound handle at sub-agent spawn time. Toggling
-    /// `composio.mode = "direct"` mid-session invalidated other caches
-    /// but left these per-action tools still routing through
-    /// `staging-api.tinyhumans.ai/agent-integrations/composio/execute`
-    /// — silently bypassing the direct-mode user's personal Composio
-    /// tenant. Resolving the client per call via
-    /// [`create_composio_client`] keeps dispatch in lockstep with the
+    /// Held so [`create_composio_client`] can resolve the direct Composio
+    /// client on every invocation. This keeps dispatch in lockstep with the
     /// live config, matching
     /// [`super::tools::ComposioExecuteTool`]. See issue #1710.
     config: Arc<Config>,

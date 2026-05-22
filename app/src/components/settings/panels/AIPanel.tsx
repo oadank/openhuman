@@ -28,11 +28,6 @@ import {
   saveAISettings,
   setCloudProviderKey,
 } from '../../../services/api/aiSettingsApi';
-import {
-  creditsApi,
-  type CreditTransaction,
-  type TeamUsage,
-} from '../../../services/api/creditsApi';
 import type { AuthStyle } from '../../../utils/tauriCommands/config';
 import {
   type HeartbeatPlannerSummary,
@@ -91,10 +86,6 @@ type RoutingMap = Record<WorkloadId, ProviderRef>;
 // Slug-keyed display metadata for built-in provider slugs. Used only for
 // chip rendering (label, tone). Custom providers use `provider.label` directly.
 const BUILTIN_PROVIDER_META: Record<string, { tone: string; label: string }> = {
-  openhuman: {
-    label: 'OpenHuman',
-    tone: 'bg-primary-50 dark:bg-primary-500/10 ring-primary-200 text-primary-900 dark:text-primary-100',
-  },
   openai: {
     label: 'OpenAI',
     tone: 'bg-emerald-50 dark:bg-emerald-500/10 ring-emerald-200 text-emerald-900 dark:text-emerald-100',
@@ -209,7 +200,6 @@ function maskKeyLabel(hasKey: boolean): string {
  * to bearer, matching the OpenAI-compatible majority.
  */
 function authStyleForSlug(slug: string): AuthStyle {
-  if (slug === 'openhuman') return 'openhuman_jwt';
   if (slug === 'anthropic') return 'anthropic';
   if (slug === 'lmstudio' || slug === 'ollama') return 'none';
   return 'bearer';
@@ -580,15 +570,8 @@ const ProviderKeyDialog = ({
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Background loop controls + usage diagnostics
+// Background loop controls + local scheduling diagnostics
 // ─────────────────────────────────────────────────────────────────────────────
-
-const USD = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 4,
-  maximumFractionDigits: 6,
-});
 
 const WEEK_MINUTES = 7 * 24 * 60;
 const COMPOSIO_PERIODIC_TICK_MINUTES = 20;
@@ -596,29 +579,10 @@ const LEARNING_REBUILD_MINUTES = 30;
 const MEMORY_WORKERS = 4;
 const MEMORY_POLL_SECONDS = 5;
 
-const formatUsd = (value: number): string => USD.format(Number.isFinite(value) ? value : 0);
-
-const spendAmount = (tx: CreditTransaction): number => {
-  const amount = Number(tx.amountUsd);
-  return Number.isFinite(amount) ? Math.abs(amount) : 0;
-};
-
 const formatCount = (value: number): string =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(
     Number.isFinite(value) ? value : 0
   );
-
-const formatDateTime = (value: string | null | undefined): string => {
-  if (!value) return 'n/a';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'n/a';
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-};
 
 const activeConnection = (connection: ComposioConnection): boolean => {
   const status = connection.status.toUpperCase();
@@ -632,56 +596,6 @@ const isCalendarConnection = (connection: ComposioConnection): boolean => {
   const toolkit = normalizedToolkit(connection);
   return toolkit === 'googlecalendar' || toolkit === 'calendar';
 };
-
-function summarizeSpendByAction(
-  transactions: CreditTransaction[]
-): Array<[string, number, number]> {
-  const byAction = new Map<string, { count: number; total: number }>();
-  for (const tx of transactions) {
-    if (tx.type !== 'SPEND') continue;
-    const key = tx.action || 'SPEND';
-    const prev = byAction.get(key) ?? { count: 0, total: 0 };
-    prev.count += 1;
-    prev.total += spendAmount(tx);
-    byAction.set(key, prev);
-  }
-  return Array.from(byAction.entries())
-    .map(([action, value]) => [action, value.count, value.total] as [string, number, number])
-    .sort((a, b) => b[2] - a[2])
-    .slice(0, 4);
-}
-
-function summarizeSpendByHour(transactions: CreditTransaction[]): Array<[string, number]> {
-  const byHour = new Map<string, number>();
-  for (const tx of transactions) {
-    if (tx.type !== 'SPEND') continue;
-    const date = new Date(tx.createdAt);
-    if (Number.isNaN(date.getTime())) continue;
-    date.setMinutes(0, 0, 0);
-    const key = date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric' });
-    byHour.set(key, (byHour.get(key) ?? 0) + spendAmount(tx));
-  }
-  return Array.from(byHour.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 4);
-}
-
-function summarizeSpendSample(transactions: CreditTransaction[]) {
-  const rows = transactions
-    .filter(tx => tx.type === 'SPEND')
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const total = rows.reduce((sum, tx) => sum + spendAmount(tx), 0);
-  const avgRowUsd = rows.length > 0 ? total / rows.length : 0;
-  const times = rows
-    .map(tx => new Date(tx.createdAt).getTime())
-    .filter(time => !Number.isNaN(time))
-    .sort((a, b) => a - b);
-  const sampleHours =
-    times.length >= 2 ? Math.max((times[times.length - 1] - times[0]) / 3_600_000, 1 / 60) : 0;
-  const spendPerHour = sampleHours > 0 ? total / sampleHours : 0;
-  const rowsPerHour = sampleHours > 0 ? rows.length / sampleHours : 0;
-  return { rows, total, avgRowUsd, sampleHours, spendPerHour, rowsPerHour };
-}
 
 function describeProvider(ref: ProviderRef, providers: CloudProvider[]): string {
   if (ref.kind === 'openhuman') return 'OpenHuman';
@@ -762,8 +676,6 @@ const BackgroundLoopControls = ({
   cloudProviders: CloudProvider[];
 }) => {
   const [settings, setSettings] = useState<HeartbeatSettings | null>(null);
-  const [usage, setUsage] = useState<TeamUsage | null>(null);
-  const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
   const [connections, setConnections] = useState<ComposioConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -781,13 +693,10 @@ const BackgroundLoopControls = ({
   const refresh = useCallback(async () => {
     setLoading(true);
     setError('');
-    const [heartbeatResult, usageResult, transactionsResult, connectionsResult] =
-      await Promise.allSettled([
-        openhumanHeartbeatSettingsGet(),
-        creditsApi.getTeamUsage(),
-        creditsApi.getTransactions(200, 0),
-        listComposioConnections(),
-      ]);
+    const [heartbeatResult, connectionsResult] = await Promise.allSettled([
+      openhumanHeartbeatSettingsGet(),
+      listComposioConnections(),
+    ]);
 
     if (heartbeatResult.status === 'fulfilled') {
       commitSettings(heartbeatResult.value.result.settings);
@@ -795,14 +704,6 @@ const BackgroundLoopControls = ({
       setError(
         heartbeatResult.reason instanceof Error ? heartbeatResult.reason.message : 'Load failed'
       );
-    }
-
-    if (usageResult.status === 'fulfilled') {
-      setUsage(usageResult.value);
-    }
-
-    if (transactionsResult.status === 'fulfilled') {
-      setTransactions(transactionsResult.value.transactions ?? []);
     }
 
     if (connectionsResult.status === 'fulfilled') {
@@ -864,11 +765,6 @@ const BackgroundLoopControls = ({
     }
   }, [refresh]);
 
-  const spendSample = summarizeSpendSample(transactions);
-  const spendRows = spendSample.rows;
-  const actionSummary = summarizeSpendByAction(transactions);
-  const hourSummary = summarizeSpendByHour(transactions);
-  const latestSpend = spendRows[0] ?? null;
   const heartbeatIntervalMinutes = settings ? Math.max(settings.interval_minutes, 5) : 5;
   const heartbeatTicksPerWeek = settings?.enabled
     ? Math.ceil(WEEK_MINUTES / heartbeatIntervalMinutes)
@@ -898,28 +794,6 @@ const BackgroundLoopControls = ({
     composioPeriodicTicksPerWeek +
     learningTicksPerWeek +
     memoryPollsPerWeek;
-  const scheduledCallsPerRemainingDollar =
-    usage && usage.remainingUsd > 0 ? backgroundApiReadsPerWeek / usage.remainingUsd : null;
-  const estimatedRowsLeft =
-    usage && spendSample.avgRowUsd > 0
-      ? Math.floor(usage.remainingUsd / spendSample.avgRowUsd)
-      : null;
-  const estimatedRowsPerBudget =
-    usage && spendSample.avgRowUsd > 0
-      ? Math.floor(usage.cycleBudgetUsd / spendSample.avgRowUsd)
-      : null;
-  const projectedHoursLeft =
-    usage && spendSample.spendPerHour > 0 ? usage.remainingUsd / spendSample.spendPerHour : null;
-  const projectionAnchorMs = latestSpend ? new Date(latestSpend.createdAt).getTime() : Number.NaN;
-  const projectedExhaustAt =
-    projectedHoursLeft !== null && Number.isFinite(projectionAnchorMs)
-      ? new Date(projectionAnchorMs + projectedHoursLeft * 3_600_000).toLocaleString([], {
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-        })
-      : 'n/a';
 
   const loops = [
     {
@@ -976,8 +850,8 @@ const BackgroundLoopControls = ({
           Background loops
         </h2>
         <p className="mt-0.5 text-xs text-stone-500 dark:text-neutral-400">
-          See what runs without a chat message, pause heartbeat work, and inspect recent credit
-          ledger rows.
+          See what runs without a chat message, pause heartbeat work, and inspect local loop
+          schedules.
         </p>
       </div>
 
@@ -1200,10 +1074,10 @@ const BackgroundLoopControls = ({
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-sm font-semibold text-stone-900 dark:text-neutral-100">
-                Recent usage ledger
+                Loop schedule
               </div>
               <div className="text-xs text-stone-500 dark:text-neutral-400">
-                Backend rows expose action/time today; source tags need backend support.
+                Local estimates for background wakeups and direct integration reads.
               </div>
             </div>
             <button
@@ -1211,35 +1085,11 @@ const BackgroundLoopControls = ({
               onClick={() => void refresh()}
               disabled={loading}
               className="rounded-md border border-stone-200 dark:border-neutral-800 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 dark:bg-neutral-800/60 dark:hover:bg-neutral-800/60 disabled:opacity-50">
-              Reload
+              Recalculate
             </button>
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
-            <MetricTile
-              label="Week budget"
-              value={usage ? formatUsd(usage.cycleBudgetUsd) : 'n/a'}
-              detail={`resets ${formatDateTime(usage?.cycleEndsAt)}`}
-            />
-            <MetricTile
-              label="Week remaining"
-              value={usage ? formatUsd(usage.remainingUsd) : 'n/a'}
-              detail={usage ? `${formatUsd(usage.cycleLimit7day)} used` : undefined}
-            />
-            <MetricTile
-              label="5h window"
-              value={
-                usage
-                  ? `${formatUsd(usage.cycleLimit5hr)} / ${formatUsd(usage.fiveHourCapUsd)}`
-                  : 'n/a'
-              }
-              detail={`resets ${formatDateTime(usage?.fiveHourResetsAt)}`}
-            />
-            <MetricTile
-              label="Avg spend row"
-              value={spendSample.avgRowUsd > 0 ? formatUsd(spendSample.avgRowUsd) : 'n/a'}
-              detail={`${spendRows.length} recent spend rows`}
-            />
+          <div className="mt-3 grid grid-cols-2 gap-2">
             <MetricTile
               label="Bg API reads"
               value={`${formatCount(backgroundApiReadsPerWeek)}/week`}
@@ -1250,67 +1100,16 @@ const BackgroundLoopControls = ({
               value={`${formatCount(backgroundWakeupsPerWeek)}/week`}
               detail={`${formatCount(memoryPollsPerWeek)} memory polls`}
             />
-          </div>
-
-          <div className="mt-3 rounded-lg border border-stone-200 dark:border-neutral-800 bg-stone-50 dark:bg-neutral-800/60 p-3">
-            <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 dark:text-neutral-500">
-              Budget math
-            </div>
-            <div className="mt-2 grid gap-2">
-              <FormulaRow
-                label="Rows left"
-                value={estimatedRowsLeft !== null ? formatCount(estimatedRowsLeft) : 'n/a'}
-                detail={
-                  estimatedRowsLeft !== null
-                    ? `remaining / avg row = ${formatUsd(usage?.remainingUsd ?? 0)} / ${formatUsd(spendSample.avgRowUsd)}`
-                    : 'Need recent spend rows to estimate.'
-                }
-              />
-              <FormulaRow
-                label="Rows per full week budget"
-                value={
-                  estimatedRowsPerBudget !== null ? formatCount(estimatedRowsPerBudget) : 'n/a'
-                }
-                detail={
-                  estimatedRowsPerBudget !== null
-                    ? `cycle budget / avg row = ${formatUsd(usage?.cycleBudgetUsd ?? 0)} / ${formatUsd(spendSample.avgRowUsd)}`
-                    : 'Need recent spend rows to estimate.'
-                }
-              />
-              <FormulaRow
-                label="Sample burn rate"
-                value={
-                  spendSample.spendPerHour > 0 ? `${formatUsd(spendSample.spendPerHour)}/hr` : 'n/a'
-                }
-                detail={
-                  spendSample.sampleHours > 0
-                    ? `${formatCount(spendSample.rowsPerHour)} rows/hr across ${spendSample.sampleHours.toFixed(1)}h sample`
-                    : 'Need timestamps from at least two spend rows.'
-                }
-              />
-              <FormulaRow
-                label="Projected empty"
-                value={projectedExhaustAt}
-                detail={
-                  projectedHoursLeft !== null
-                    ? `${projectedHoursLeft.toFixed(1)}h after latest spend at recent burn rate`
-                    : 'No projection without recent hourly spend.'
-                }
-              />
-              <FormulaRow
-                label="API reads per $ remaining"
-                value={
-                  scheduledCallsPerRemainingDollar !== null
-                    ? `${formatCount(scheduledCallsPerRemainingDollar)} reads/$`
-                    : 'n/a'
-                }
-                detail={
-                  usage
-                    ? `background API reads/week / remaining = ${formatCount(backgroundApiReadsPerWeek)} / ${formatUsd(usage.remainingUsd)}`
-                    : 'Need usage response to estimate.'
-                }
-              />
-            </div>
+            <MetricTile
+              label="Active integrations"
+              value={formatCount(activeConnections.length)}
+              detail={`${formatCount(activeCalendarConnections.length)} calendar`}
+            />
+            <MetricTile
+              label="Calendar fanout"
+              value={`${formatCount(calendarConnectionsPolled)}/${formatCount(activeCalendarConnections.length)}`}
+              detail={`${formatCount(calendarConnectionsSkipped)} skipped by cap`}
+            />
           </div>
 
           <div className="mt-3 rounded-lg border border-stone-200 dark:border-neutral-800 bg-stone-50 dark:bg-neutral-800/60 p-3">
@@ -1361,63 +1160,6 @@ const BackgroundLoopControls = ({
                 value={`${formatCount(memoryPollsPerWeek)}/week max`}
                 detail={`${MEMORY_WORKERS} workers * ${MEMORY_POLL_SECONDS}s poll; LLM calls only for queued jobs`}
               />
-            </div>
-          </div>
-
-          {latestSpend && (
-            <div className="mt-3 rounded-md border border-stone-200 dark:border-neutral-800 bg-stone-50 dark:bg-neutral-800/60 px-3 py-2 text-xs text-stone-600 dark:text-neutral-300">
-              Latest spend: {formatUsd(spendAmount(latestSpend))} at{' '}
-              {new Date(latestSpend.createdAt).toLocaleString()} ({latestSpend.action})
-            </div>
-          )}
-
-          <div className="mt-3 space-y-3">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 dark:text-neutral-500">
-                Top actions
-              </div>
-              <div className="mt-1 space-y-1">
-                {actionSummary.length > 0 ? (
-                  actionSummary.map(([action, count, total]) => (
-                    <div
-                      key={action}
-                      className="flex items-center justify-between gap-2 text-xs text-stone-600 dark:text-neutral-300">
-                      <span className="truncate font-mono">{action}</span>
-                      <span className="shrink-0 text-stone-500 dark:text-neutral-400">
-                        {count} / {formatUsd(total)}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-xs text-stone-500 dark:text-neutral-400">
-                    No spend rows loaded.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 dark:text-neutral-500">
-                Top hours
-              </div>
-              <div className="mt-1 space-y-1">
-                {hourSummary.length > 0 ? (
-                  hourSummary.map(([hour, total]) => (
-                    <div
-                      key={hour}
-                      className="flex items-center justify-between gap-2 text-xs text-stone-600 dark:text-neutral-300">
-                      <span>{hour}</span>
-                      <span className="font-mono text-stone-500 dark:text-neutral-400">
-                        {formatUsd(total)}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-xs text-stone-500 dark:text-neutral-400">
-                    No hourly spend yet.
-                  </div>
-                )}
-              </div>
             </div>
           </div>
         </div>
@@ -2394,8 +2136,6 @@ const CloudProviderEditor = ({
 
 function defaultEndpointFor(slug: string): string {
   switch (slug) {
-    case 'openhuman':
-      return 'https://api.openhuman.ai/v1';
     case 'openai':
       return 'https://api.openai.com/v1';
     case 'anthropic':

@@ -104,21 +104,21 @@ describe('isMissingRequiredFieldsError', () => {
 describe('sanitizeAuthError', () => {
   it('returns a generic message for missing-required-fields errors', () => {
     const err = new Error(
-      'Authorization failed: [composio] authorize failed: Backend returned 400 Bad Request for POST https://api.tinyhumans.ai/agent-integrations/composio/authorize: Composio authorization failed: 400 {"error":{"slug":"ConnectedAccount_MissingRequiredFields","code":612}}'
+      'Authorization failed: [composio] authorize failed: Composio returned 400 Bad Request for POST https://backend.composio.dev/api/v3/connected_accounts/link: {"error":{"slug":"ConnectedAccount_MissingRequiredFields","code":612}}'
     );
     const result = sanitizeAuthError(err);
     expect(result).not.toContain('ConnectedAccount_MissingRequiredFields');
-    expect(result).not.toContain('api.tinyhumans.ai');
+    expect(result).not.toContain('backend.composio.dev');
     expect(result).not.toContain('612');
     expect(result).toContain('required field');
   });
 
-  it('strips backend URLs from plain authorization errors', () => {
+  it('strips provider URLs from plain authorization errors', () => {
     const err = new Error(
-      'Authorization failed: Backend returned 500 Internal Server Error for POST https://api.tinyhumans.ai/agent-integrations/composio/authorize: internal error'
+      'Authorization failed: Composio returned 500 Internal Server Error for POST https://backend.composio.dev/api/v3/connected_accounts/link: internal error'
     );
     const result = sanitizeAuthError(err);
-    expect(result).not.toContain('api.tinyhumans.ai');
+    expect(result).not.toContain('backend.composio.dev');
     expect(result).not.toContain('https://');
   });
 
@@ -245,12 +245,8 @@ describe('<ComposioConnectModal>', () => {
   // Verifies the end-to-end OAuth handoff plumbing for #1710:
   //   Connect click → authorize RPC → openUrl(connectUrl).
   //
-  // The frontend doesn't care whether the URL is the backend's
-  // `/agent-integrations/composio/authorize` redirect or Composio's
-  // hosted `https://hosted.composio.dev/<token>` — both come back via
-  // the same `connectUrl` field on `ComposioAuthorizeResponse`, so this
-  // single assertion covers both modes. After this commit the
-  // mechanically-wired direct-mode flow is: ops.rs `composio_authorize`
+  // The frontend only cares that the direct Composio authorize flow returns
+  // a hosted `connectUrl` field on `ComposioAuthorizeResponse`.
   // → factory routes to Direct → `direct_authorize` returns a Composio
   // hosted URL → frontend opens it in the system browser via this
   // path → `list_connections` polling detects the new ACTIVE row.
@@ -449,7 +445,7 @@ describe('<ComposioConnectModal> — needs-subdomain recovery phase', () => {
   it('surfaces a sanitized (non-raw) error for unrelated authorization failures', async () => {
     vi.mocked(authorize).mockRejectedValueOnce(
       new Error(
-        'Authorization failed: Backend returned 500 Internal Server Error for POST https://api.tinyhumans.ai/agent-integrations/composio/authorize: {"error":{"message":"internal server error payload","code":500}}'
+        'Authorization failed: Composio returned 500 Internal Server Error for POST https://backend.composio.dev/api/v3/connected_accounts/link: {"error":{"message":"internal server error payload","code":500}}'
       )
     );
 
@@ -461,7 +457,7 @@ describe('<ComposioConnectModal> — needs-subdomain recovery phase', () => {
       // Should be in error phase, not needs-subdomain
       expect(screen.getByRole('button', { name: /Dismiss/i })).toBeInTheDocument();
       // Raw URL should not be shown
-      expect(screen.queryByText(/api.tinyhumans.ai/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/backend\.composio\.dev/i)).not.toBeInTheDocument();
       // Raw JSON payload should not be shown
       expect(screen.queryByText(/internal server error payload/i)).not.toBeInTheDocument();
     });

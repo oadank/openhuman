@@ -22,8 +22,8 @@ fn oh_entry(id: &str) -> CloudProviderCreds {
         id: id.to_string(),
         slug: "openhuman".to_string(),
         label: "OpenHuman".to_string(),
-        endpoint: "https://api.openhuman.ai/v1".to_string(),
-        auth_style: AuthStyle::OpenhumanJwt,
+        endpoint: "https://api.example.test/v1".to_string(),
+        auth_style: AuthStyle::Bearer,
         ..Default::default()
     }
 }

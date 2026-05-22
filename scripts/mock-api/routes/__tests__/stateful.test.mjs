@@ -109,7 +109,7 @@ test("applies injected HTTP fault rules without route-specific controller logic"
       httpFaultRules: JSON.stringify([
         {
           method: "GET",
-          pathRegex: "^/auth/me(?:\\?.*)?$",
+          pathRegex: "^/settings(?:\\?.*)?$",
           status: 503,
           body: { success: false, error: "Synthetic outage" },
         },
@@ -118,7 +118,7 @@ test("applies injected HTTP fault rules without route-specific controller logic"
     "replace",
   );
 
-  const response = await fetch(`${baseUrl}/auth/me`);
+  const response = await fetch(`${baseUrl}/settings`);
   assert.equal(response.status, 503);
   const body = await response.json();
   assert.equal(body.error, "Synthetic outage");

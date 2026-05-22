@@ -32,7 +32,7 @@ export function useComposeioTriggerHistory(limit = 100): ComposeioTriggerHistory
   // local webhook receiver dispatching to the event bus — it has
   // no dependency on a backend session. Gate-skipping the
   // sessionToken check so direct-mode users (BYO Composio key, no
-  // OpenHuman backend sign-in) can see their trigger history
+  // local-only sessions can see their trigger history
   // populate as events land.
   const refresh = useCallback(async () => {
     if (isRefreshingRef.current) {

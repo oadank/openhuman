@@ -80,7 +80,7 @@ describe('ConnectionIndicator', () => {
   });
 
   it('stays "Connected" when only the backend socket is disconnected (local-OAuth fork)', () => {
-    // The hosted OpenHuman backend was removed — `backend-only` is no
+    // The hosted app socket was removed — `backend-only` is no
     // longer a blocking state, so a disconnected backend channel must
     // not surface "Reconnecting…" in the indicator.
     renderWithProviders(<ConnectionIndicator />, {

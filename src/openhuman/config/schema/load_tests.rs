@@ -84,18 +84,18 @@ fn pre_login_user_dir_is_under_users_tree() {
 
 #[test]
 fn default_root_dir_name_uses_staging_suffix_for_staging_env() {
-    let prior = std::env::var(crate::api::config::APP_ENV_VAR).ok();
+    const APP_ENV_VAR: &str = "OPENHUMAN_APP_ENV";
+    let prior = std::env::var(APP_ENV_VAR).ok();
 
-    std::env::set_var(crate::api::config::APP_ENV_VAR, "staging");
-    assert!(crate::api::config::is_staging_app_env(Some("staging")));
+    std::env::set_var(APP_ENV_VAR, "staging");
     assert_eq!(default_root_dir_name(), ".openhuman-staging");
 
-    std::env::set_var(crate::api::config::APP_ENV_VAR, "production");
+    std::env::set_var(APP_ENV_VAR, "production");
     assert_eq!(default_root_dir_name(), ".openhuman");
 
     match prior {
-        Some(value) => std::env::set_var(crate::api::config::APP_ENV_VAR, value),
-        None => std::env::remove_var(crate::api::config::APP_ENV_VAR),
+        Some(value) => std::env::set_var(APP_ENV_VAR, value),
+        None => std::env::remove_var(APP_ENV_VAR),
     }
 }
 
@@ -1048,7 +1048,7 @@ async fn test_corrupt_config_corrupt_backup_falls_back_to_defaults() {
 fn test_missing_default_temperature_uses_correct_default() {
     // TOML with no `default_temperature` field — serde should apply the
     // `default_temperature_value()` fn (0.7), not the bare Default (0.0).
-    let toml_without_temperature = "api_url = \"https://example.com\"\n";
+    let toml_without_temperature = "default_model = \"gpt-4o\"\n";
     let config: Config = toml::from_str(toml_without_temperature).unwrap();
     assert!(
         (config.default_temperature - 0.7).abs() < f64::EPSILON,
@@ -1342,46 +1342,4 @@ fn redact_url_fallback_masks_userinfo_when_unparseable() {
     let out = redact_url_for_log("not-a-scheme://user:secret@host/path?token=1");
     assert!(!out.contains("secret"), "got: {out}");
     assert!(!out.contains("token=1"), "got: {out}");
-}
-
-#[test]
-fn migrate_legacy_inference_url_moves_external_chat_completions() {
-    let mut cfg = Config::default();
-    cfg.api_url = Some("https://api.openai.com/v1/chat/completions".to_string());
-    cfg.inference_url = None;
-    migrate_legacy_inference_url(&mut cfg);
-    assert_eq!(cfg.api_url, None);
-    assert_eq!(
-        cfg.inference_url.as_deref(),
-        Some("https://api.openai.com/v1/chat/completions")
-    );
-}
-
-#[test]
-fn migrate_legacy_inference_url_clears_openhuman_backend_form() {
-    let mut cfg = Config::default();
-    cfg.api_url = Some("https://api.tinyhumans.ai/openai/v1/chat/completions".to_string());
-    cfg.inference_url = None;
-    migrate_legacy_inference_url(&mut cfg);
-    // The OpenHuman host is the default backend — both fields end up None so
-    // inference flows through the derived default `{backend}/openai/v1/...`.
-    assert_eq!(cfg.api_url, None);
-    assert_eq!(cfg.inference_url, None);
-}
-
-#[test]
-fn migrate_legacy_inference_url_is_noop_when_inference_url_set() {
-    let mut cfg = Config::default();
-    cfg.api_url = Some("https://api.openai.com/v1/chat/completions".to_string());
-    cfg.inference_url = Some("https://existing.example/v1/chat/completions".to_string());
-    migrate_legacy_inference_url(&mut cfg);
-    // Existing inference_url wins — api_url is left alone.
-    assert_eq!(
-        cfg.api_url.as_deref(),
-        Some("https://api.openai.com/v1/chat/completions")
-    );
-    assert_eq!(
-        cfg.inference_url.as_deref(),
-        Some("https://existing.example/v1/chat/completions")
-    );
 }

@@ -9,11 +9,10 @@
 //!    to [`crate::openhuman::voice::cloud_transcribe`]. Returns the
 //!    transcribed text (or `Err` on transport / auth failure).
 //!
-//! 2. **LLM** — send a tiny chat-completions request through
-//!    [`crate::api::BackendOAuthClient`] with a "live meeting agent"
-//!    system prompt and the transcript as the user message. Returns a
-//!    short reply (or empty string when the agent decides to stay
-//!    silent).
+//! 2. **LLM** — send a tiny chat request through the configured local
+//!    workload provider with a "live meeting agent" system prompt and
+//!    the transcript as the user message. Returns a short reply (or
+//!    empty string when the agent decides to stay silent).
 //!
 //! 3. **TTS** — feed the reply text into
 //!    [`crate::openhuman::voice::reply_speech`] requesting
@@ -31,7 +30,7 @@
 //! log, not silently degraded to a stub.
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use super::session::registry;
 use super::types::{SessionEvent, SessionEventKind};
@@ -42,10 +41,6 @@ use super::wav;
 /// captioned dialogue — enough for the model to follow a thread without
 /// blowing the prompt budget.
 const CONTEXT_EVENT_WINDOW: usize = 12;
-/// Spoken-reply ceiling. Each token is roughly ¾ of a word, so 220
-/// tokens ≈ 30 seconds of speech — long enough for a real answer, short
-/// enough that the model can't hijack the meeting.
-const REPLY_MAX_TOKENS: u32 = 220;
 /// ElevenLabs model. `eleven_turbo_v2_5` strikes the best
 /// quality/latency balance; the older default the backend would pick
 /// (`eleven_monolingual_v1`) sounds noticeably flatter.
@@ -330,50 +325,29 @@ in one sentence rather than guessing.\n\
 just do it.\n\
 ";
 
-/// Build a chat-completions request from rolling meeting history plus
-/// the current user prompt, post it through the backend, and return
-/// the assistant's reply (trimmed, possibly empty).
+/// Build a chat request from rolling meeting history plus the current
+/// user prompt and return the assistant's reply (trimmed, possibly empty).
 async fn llm_meeting(prompt: &str, history: &[ConversationTurn]) -> Result<String, String> {
-    use crate::api::config::effective_backend_api_url;
-    use crate::api::jwt::get_session_token;
-    use crate::api::BackendOAuthClient;
-    use reqwest::Method;
+    use crate::openhuman::inference::provider::{create_chat_provider, ChatMessage};
 
     let config = crate::openhuman::config::ops::load_config_with_timeout().await?;
-    let token = get_session_token(&config)
-        .map_err(|e| e.to_string())?
-        .filter(|t| !t.trim().is_empty())
-        .ok_or_else(|| "no backend session token".to_string())?;
+    let (provider, model) =
+        create_chat_provider("agentic", &config).map_err(|e| e.to_string())?;
 
-    let api_url = effective_backend_api_url(&config.api_url);
-    let client = BackendOAuthClient::new(&api_url).map_err(|e| e.to_string())?;
-
-    let mut messages: Vec<Value> = Vec::with_capacity(history.len() + 2);
-    messages.push(json!({ "role": "system", "content": MEETING_SYSTEM_PROMPT }));
+    let mut messages: Vec<ChatMessage> = Vec::with_capacity(history.len() + 2);
+    messages.push(ChatMessage::system(MEETING_SYSTEM_PROMPT));
     for turn in history {
-        messages.push(json!({ "role": turn.role, "content": turn.content }));
+        messages.push(match turn.role {
+            "assistant" => ChatMessage::assistant(&turn.content),
+            _ => ChatMessage::user(&turn.content),
+        });
     }
-    messages.push(json!({ "role": "user", "content": prompt }));
+    messages.push(ChatMessage::user(prompt));
 
-    let body = json!({
-        "model": "agentic-v1",
-        "temperature": 0.5,
-        "max_tokens": REPLY_MAX_TOKENS,
-        "messages": messages,
-    });
-
-    let raw = client
-        .authed_json(
-            &token,
-            Method::POST,
-            "/openai/v1/chat/completions",
-            Some(body),
-        )
+    let text = provider
+        .chat_with_history(&messages, &model, 0.5)
         .await
         .map_err(|e| e.to_string())?;
-
-    let text = extract_chat_completion_text(&raw)
-        .ok_or_else(|| format!("unexpected chat completions response: {raw}"))?;
     Ok(strip_for_speech(&text))
 }
 
@@ -485,17 +459,7 @@ async fn tts(text: &str) -> Result<Vec<i16>, String> {
         .collect())
 }
 
-fn extract_chat_completion_text(raw: &Value) -> Option<String> {
-    raw.get("choices")
-        .and_then(|c| c.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|first| first.get("message"))
-        .and_then(|m| m.get("content"))
-        .and_then(|s| s.as_str())
-        .map(|s| s.trim().to_string())
-}
-
-// ─── Stubs (fallback for tests / no-backend) ────────────────────────
+// ─── Stubs (fallback for tests / no-provider) ───────────────────────
 
 async fn stub_stt(samples: &[i16]) -> String {
     let secs = samples.len() as f32 / SAMPLE_RATE_HZ as f32;
@@ -562,28 +526,6 @@ mod tests {
             })
             .unwrap();
         let _ = registry().stop("brain-fallback");
-    }
-
-    #[test]
-    fn extract_chat_completion_text_pulls_first_choice() {
-        let raw = json!({
-            "choices": [
-                { "message": { "content": "  hello world  " } }
-            ]
-        });
-        assert_eq!(
-            extract_chat_completion_text(&raw),
-            Some("hello world".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_chat_completion_text_returns_none_on_malformed() {
-        assert_eq!(extract_chat_completion_text(&json!({})), None);
-        assert_eq!(
-            extract_chat_completion_text(&json!({ "choices": [] })),
-            None
-        );
     }
 
     #[test]

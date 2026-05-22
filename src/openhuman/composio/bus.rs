@@ -1,11 +1,7 @@
 //! Event bus subscribers for the Composio domain.
 //!
-//! The backend emits `composio:trigger` over Socket.IO when a webhook
-//! arrives and is HMAC-verified (see
-//! `src/controllers/agentIntegrations/composio/handleWebhook.ts` in the
-//! backend repo). The socket transport layer parses that payload and
-//! publishes [`DomainEvent::ComposioTriggerReceived`], and this
-//! subscriber is what actually does something with it.
+//! Composio trigger events are delivered by the local direct-mode
+//! webhook receiver and published as [`DomainEvent::ComposioTriggerReceived`].
 //!
 //! ## What it does today
 //!
@@ -31,9 +27,7 @@
 //! There are two long-lived subscribers, both registered at startup:
 //!
 //!   * [`ComposioTriggerSubscriber`] — handles
-//!     [`DomainEvent::ComposioTriggerReceived`]. The backend HMAC-verifies
-//!     a Composio webhook, parses it, and emits `composio:trigger` over
-//!     Socket.IO; the socket transport publishes that as a domain event.
+//!     [`DomainEvent::ComposioTriggerReceived`].
 //!     The subscriber routes it through the triage pipeline.
 //!
 //!   * [`ComposioConnectionCreatedSubscriber`] — handles
@@ -56,7 +50,7 @@ use crate::openhuman::agent::triage::{apply_decision, run_triage, TriageOutcome,
 use crate::openhuman::composio::trigger_history;
 use crate::openhuman::config::rpc as config_rpc;
 
-use super::client::ComposioClient;
+use super::client::{create_composio_client, direct_list_connections, ComposioClientKind};
 use super::providers::{get_provider, ProviderContext};
 
 /// Env var that **disables** the triage pipeline. The pipeline is
@@ -65,7 +59,7 @@ use super::providers::{get_provider, ProviderContext};
 /// webhook are undesirable).
 const TRIAGE_DISABLED_ENV: &str = "OPENHUMAN_TRIGGER_TRIAGE_DISABLED";
 
-/// How long we'll keep polling the backend after `composio_authorize`
+/// How long we'll keep polling Composio after `composio_authorize`
 /// returns a `connectUrl`, waiting for the user to actually finish the
 /// hosted OAuth flow and the connection to flip to ACTIVE/CONNECTED.
 /// One minute matches typical hosted-OAuth round-trip times and is
@@ -74,7 +68,7 @@ const CONNECTION_READY_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Poll backoff schedule (start, max). We start aggressive so the
 /// fast-path (user already had the tab open) feels immediate, then
-/// back off so we don't hammer the backend during the long tail of
+/// back off so we don't hammer Composio during the long tail of
 /// users who actually have to log in to the upstream service.
 const CONNECTION_READY_INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 const CONNECTION_READY_MAX_BACKOFF: Duration = Duration::from_secs(4);
@@ -446,23 +440,18 @@ impl EventHandler for ComposioConnectionCreatedSubscriber {
                 return;
             };
 
-            // `wait_for_connection_active` is a backend-only metadata
-            // probe (`list_connections`). Resolve a backend
-            // `ComposioClient` from the live config for it; direct-mode
-            // users surface a clear error here rather than silently
-            // routing through the wrong tenant (#1710).
-            let backend_client = match ctx.backend_client().await {
-                Ok(c) => c,
+            let direct = match create_composio_client(ctx.config.as_ref()) {
+                Ok(ComposioClientKind::Direct(direct)) => direct,
                 Err(e) => {
                     tracing::debug!(
                         toolkit = %toolkit,
                         error = %e,
-                        "[composio:bus] backend client unavailable for connection-readiness poll; skipping"
+                        "[composio:bus] direct client unavailable for connection-readiness poll; skipping"
                     );
                     return;
                 }
             };
-            match wait_for_connection_active(&backend_client, &connection_id).await {
+            match wait_for_connection_active(&direct, &connection_id).await {
                 Ok(status) => {
                     tracing::info!(
                         toolkit = %toolkit,
@@ -474,7 +463,7 @@ impl EventHandler for ComposioConnectionCreatedSubscriber {
                     // the connection is confirmed ACTIVE, so the next
                     // agent session picks up the newly connected toolkit.
                     super::ops::invalidate_connected_integrations_cache();
-                    // Eagerly warm the cache from the backend so the
+                    // Eagerly warm the cache from Composio so the
                     // very next `cached_active_integrations` read
                     // (typically the orchestrator's next-turn refresh,
                     // or the desktop UI's 5 s `composio_list_connections`
@@ -482,12 +471,12 @@ impl EventHandler for ComposioConnectionCreatedSubscriber {
                     // toolkit immediately instead of waiting for a
                     // cache-miss round trip on the hot path. Cost: one
                     // background `list_connections` call per OAuth
-                    // completion. Best-effort — on backend failure the
+                    // completion. Best-effort — on Composio failure the
                     // UI poll will repopulate within ~5 s as a safety
                     // net.
                     //
                     // Use the status-distinguishing fetcher so we log
-                    // `Authoritative(empty)` and backend unavailability
+                    // `Authoritative(empty)` and Composio unavailability
                     // differently — `fetch_connected_integrations`
                     // collapses both to `Vec::new()` and would
                     // otherwise hide auth/backend failures from
@@ -506,7 +495,7 @@ impl EventHandler for ComposioConnectionCreatedSubscriber {
                             tracing::warn!(
                                 toolkit = %toolkit,
                                 connection_id = %connection_id,
-                                "[composio:bus] eager cache warm after connection became active skipped: backend unavailable"
+                                "[composio:bus] eager cache warm after connection became active skipped: composio unavailable"
                             );
                         }
                     }
@@ -526,7 +515,7 @@ impl EventHandler for ComposioConnectionCreatedSubscriber {
                         toolkit = %toolkit,
                         connection_id = %connection_id,
                         error = %error,
-                        "[composio:bus] backend lookup failed while waiting for connection; skipping cache refresh + provider hook"
+                        "[composio:bus] composio lookup failed while waiting for connection; skipping cache refresh + provider hook"
                     );
                     return;
                 }
@@ -566,16 +555,16 @@ impl EventHandler for ComposioConnectionCreatedSubscriber {
 #[derive(Debug)]
 enum WaitError {
     /// Polling exhausted [`CONNECTION_READY_TIMEOUT`] without observing
-    /// the connection in an active state. `last_status` is whatever the
-    /// backend last reported (e.g. `"INITIATED"`, `"PENDING"`).
+    /// the connection in an active state. `last_status` is whatever
+    /// Composio last reported (e.g. `"INITIATED"`, `"PENDING"`).
     Timeout { last_status: Option<String> },
-    /// The backend lookup itself errored — we treat that as fatal for
+    /// The Composio lookup itself errored — we treat that as fatal for
     /// this dispatch (no point spinning when `list_connections` is
     /// unreachable).
     Lookup { error: String },
 }
 
-/// Poll the backend for `connection_id` until it appears with an
+/// Poll Composio for `connection_id` until it appears with an
 /// `ACTIVE` or `CONNECTED` status, or until we hit
 /// [`CONNECTION_READY_TIMEOUT`]. Backoff is exponential between
 /// [`CONNECTION_READY_INITIAL_BACKOFF`] and
@@ -584,7 +573,7 @@ enum WaitError {
 /// On success returns the observed status string. On timeout returns
 /// the last status we saw (helpful for "stuck in INITIATED" debugging).
 async fn wait_for_connection_active(
-    client: &ComposioClient,
+    direct: &Arc<crate::openhuman::tools::ComposioTool>,
     connection_id: &str,
 ) -> Result<String, WaitError> {
     let started = std::time::Instant::now();
@@ -592,7 +581,7 @@ async fn wait_for_connection_active(
     let mut last_status: Option<String> = None;
 
     loop {
-        match client.list_connections().await {
+        match direct_list_connections(direct).await {
             Ok(resp) => {
                 if let Some(conn) = resp.connections.into_iter().find(|c| c.id == connection_id) {
                     if conn.is_active() {

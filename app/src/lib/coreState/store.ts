@@ -1,5 +1,4 @@
 import type { User } from '../../types/api';
-import type { TeamInvite, TeamMember, TeamWithRole } from '../../types/team';
 import type { AccessibilityStatus } from '../../utils/tauriCommands/accessibility';
 import type { AutocompleteStatus } from '../../utils/tauriCommands/autocomplete';
 import type { LocalAiStatus } from '../../utils/tauriCommands/localAi';
@@ -63,9 +62,6 @@ export interface CoreState {
   isBootstrapping: boolean;
   isReady: boolean;
   snapshot: CoreAppSnapshot;
-  teams: TeamWithRole[];
-  teamMembersById: Record<string, TeamMember[]>;
-  teamInvitesById: Record<string, TeamInvite[]>;
 }
 
 const emptySnapshot: CoreAppSnapshot = {
@@ -84,9 +80,6 @@ let currentState: CoreState = {
   isBootstrapping: true,
   isReady: false,
   snapshot: emptySnapshot,
-  teams: [],
-  teamMembersById: {},
-  teamInvitesById: {},
 };
 
 export function getCoreStateSnapshot(): CoreState {

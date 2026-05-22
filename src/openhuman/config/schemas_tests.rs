@@ -123,7 +123,6 @@ fn deserialize_params_parses_model_settings_update() {
     );
     let out: ModelSettingsUpdate = deserialize_params(m).unwrap();
     assert_eq!(out.default_temperature, Some(0.7));
-    assert!(out.api_url.is_none());
     assert!(out.default_model.is_none());
 }
 

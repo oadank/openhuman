@@ -25,22 +25,56 @@ struct PendingCefPurgeState {
 }
 
 /// Resolves the on-disk OpenHuman root dir name (`.openhuman` vs
-/// `.openhuman-staging`) for the Tauri shell. Delegates to
-/// [`openhuman_core::api::config::app_env_from_env`] so the shell and the
-/// embedded core agree on the channel selection — including the
-/// `option_env!` compile-time fallback that staging CI bakes into the
-/// build. Without that fallback the packaged staging `.app` launched from
-/// Finder has no shell env, picks up `.openhuman` (production), and
-/// collides with any older production install's CEF profile, producing
-/// the startup crash loop reported in #1490.
+/// `.openhuman-staging`) for the Tauri shell. This intentionally keeps the
+/// app-environment lookup local to the shell now that the core backend API
+/// config module is gone, while preserving the runtime + compile-time fallback
+/// behavior staging builds rely on. Without that fallback the packaged staging
+/// `.app` launched from Finder has no shell env, picks up `.openhuman`
+/// (production), and collides with any older production install's CEF profile,
+/// producing the startup crash loop reported in #1490.
 fn default_root_dir_name() -> &'static str {
-    if openhuman_core::api::config::is_staging_app_env(
-        openhuman_core::api::config::app_env_from_env().as_deref(),
-    ) {
+    if is_staging_app_env(app_env_from_env().as_deref()) {
         ".openhuman-staging"
     } else {
         ".openhuman"
     }
+}
+
+fn app_env_from_env() -> Option<String> {
+    for key in ["OPENHUMAN_APP_ENV", "VITE_OPENHUMAN_APP_ENV"] {
+        if let Ok(value) = std::env::var(key) {
+            let normalized = value.trim().to_ascii_lowercase();
+            if !normalized.is_empty() {
+                return Some(normalized);
+            }
+        }
+    }
+
+    for value in compile_time_app_env_values().into_iter().flatten() {
+        let normalized = value.trim().to_ascii_lowercase();
+        if !normalized.is_empty() {
+            return Some(normalized);
+        }
+    }
+
+    None
+}
+
+#[cfg(not(test))]
+fn compile_time_app_env_values() -> [Option<&'static str>; 2] {
+    [
+        option_env!("OPENHUMAN_APP_ENV"),
+        option_env!("VITE_OPENHUMAN_APP_ENV"),
+    ]
+}
+
+#[cfg(test)]
+fn compile_time_app_env_values() -> [Option<&'static str>; 2] {
+    [None, None]
+}
+
+fn is_staging_app_env(app_env: Option<&str>) -> bool {
+    matches!(app_env.map(str::trim), Some(env) if env.eq_ignore_ascii_case("staging"))
 }
 
 pub fn default_root_openhuman_dir() -> Result<PathBuf, String> {
@@ -285,7 +319,7 @@ pub fn prepare_process_cache_path() -> Result<PathBuf, String> {
 
     // Honor a pre-set `OPENHUMAN_CEF_CACHE_PATH` so harnesses (E2E in
     // particular) can locate the CEF cache outside the OpenHuman workspace
-    // tree. The mega-flow spec calls `openhuman.config_reset_local_data`
+    // tree. Some E2E specs call `openhuman.config_reset_local_data`
     // between scenarios, which `remove_dir_all`'s the whole workspace —
     // if CEF's cache lives inside it the running renderer crashes mid-spec
     // and every subsequent WDIO command fails with "invalid session id".
@@ -459,11 +493,9 @@ mod tests {
 
     /// Regression for #1490: with the staging env var set at runtime, the
     /// Tauri shell must resolve the dedicated `.openhuman-staging` data
-    /// dir — never the production `.openhuman` dir. Prior to the fix
-    /// this function had its own runtime-only lookup and would diverge
-    /// from `openhuman_core::api::config::app_env_from_env`, producing a
-    /// split-brain datadir (CEF profile under prod, sidecar state under
-    /// staging) that crashed the app on launch.
+    /// dir — never the production `.openhuman` dir. The lookup must stay
+    /// aligned with the core's app-environment convention so CEF profile
+    /// state and core state land under the same root.
     #[test]
     fn default_root_dir_name_resolves_staging_when_primary_env_set() {
         with_clean_app_env(|| {
@@ -495,9 +527,7 @@ mod tests {
         });
     }
 
-    /// Whitespace and casing are folded by
-    /// `openhuman_core::api::config::app_env_from_env` — confirm the shell
-    /// inherits that behavior rather than re-implementing it.
+    /// Whitespace and casing are folded before comparison.
     #[test]
     fn default_root_dir_name_normalizes_staging_casing_and_whitespace() {
         with_clean_app_env(|| {

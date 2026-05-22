@@ -4,15 +4,15 @@ This directory contains the React context providers that manage the global state
 
 ## CoreStateProvider
 
-Manages the authoritative global state of the application, including user authentication, session tokens, and the application snapshot.
+Manages the authoritative global state of the application, including local identity and the application snapshot.
 
 ### Turn-Boundary Refetch Contract
 
-To ensure that the UI stays in sync with the backend state (especially during onboarding and context gathering), the application follows a refetch-on-turn-end contract:
+To ensure that the UI stays in sync with the local core state (especially during onboarding and context gathering), the application follows a refetch-on-turn-end contract:
 
-- **Refetch Timing**: After every agent reply completes (the `chat_done` event in `ChatRuntimeProvider`), the application refetches the authoritative user state via `userApi.getMe()`.
+- **Refetch Timing**: After every agent reply completes (the `chat_done` event in `ChatRuntimeProvider`), the application refreshes the authoritative core snapshot via `CoreStateProvider.refresh()`.
 - **Debounce**: Multiple rapid turn-finalized events within 750ms are collapsed into a single refetch call to avoid unnecessary network traffic.
-- **Single Source of Truth**: The refetched state is merged into the global snapshot using `patchSnapshot`. Components should bind to this global snapshot to ensure they reflect the latest backend state without requiring a full remount.
+- **Single Source of Truth**: Components should bind to this global snapshot to ensure they reflect the latest local state without requiring a full remount.
 - **Fire-and-Forget**: The refetch operation is non-blocking and fires on a microtask after the chat UI has painted the final response.
 
 ## ChatRuntimeProvider

@@ -45,7 +45,7 @@ pub fn schemas(function: &str) -> ControllerSchema {
             inputs: vec![FieldSchema {
                 name: "tool_id",
                 ty: TypeSchema::String,
-                comment: "Stable registry id, for example `memory.search` or `tools.web_search`.",
+                comment: "Stable registry id, for example `memory.search`.",
                 required: true,
             }],
             outputs: vec![FieldSchema {
@@ -157,12 +157,12 @@ mod tests {
     #[tokio::test]
     async fn handle_get_returns_one_registry_entry() {
         let mut params = Map::new();
-        params.insert("tool_id".to_string(), json!("tools.web_search"));
+        params.insert("tool_id".to_string(), json!("memory.search"));
 
         let value = handle_get(params).await.expect("get json");
         assert_eq!(
             value.get("tool_id").and_then(Value::as_str),
-            Some("tools.web_search")
+            Some("memory.search")
         );
     }
 }

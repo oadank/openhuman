@@ -28,12 +28,11 @@ fn composio_direct_mode_capabilities_are_registered() {
 
 #[test]
 fn search_matches_keyword_across_multiple_fields() {
-    let matches = search("invite");
+    let matches = search("model");
     let ids: Vec<&str> = matches.iter().map(|capability| capability.id).collect();
 
-    assert!(ids.contains(&"team.join_via_invite_code"));
-    assert!(ids.contains(&"team.generate_invite_codes"));
-    assert!(ids.contains(&"team.track_invite_usage"));
+    assert!(ids.contains(&"local_ai.download_model"));
+    assert!(ids.contains(&"local_ai.whisper_installer"));
 }
 
 #[test]
@@ -60,7 +59,7 @@ fn annotated_capability_exposes_privacy_metadata() {
     let privacy = cap.privacy.expect("conversation.send_text annotated");
     assert!(privacy.leaves_device);
     assert_eq!(privacy.data_kind, PrivacyDataKind::Derived);
-    assert!(privacy.destinations.contains(&"OpenHuman backend"));
+    assert!(privacy.destinations.contains(&"Configured LLM provider"));
 }
 
 #[test]

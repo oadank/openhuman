@@ -315,7 +315,6 @@ const hi3: TranslationMap = {
   'app.openhumanLink.skipForNow': 'अभी के लिए स्किप करें',
   'app.openhumanLink.telegramUnavailable': 'Telegram उपलब्ध नहीं',
   'app.openhumanLink.title.accounts': 'अपने ऐप्स कनेक्ट करें',
-  'app.openhumanLink.title.billing': 'बिलिंग और क्रेडिट',
   'app.openhumanLink.title.discord': 'कम्युनिटी जॉइन करें',
   'app.openhumanLink.title.messaging': 'चैट चैनल कनेक्ट करें',
   'app.openhumanLink.title.notifications': 'नोटिफिकेशन की अनुमति दें',
