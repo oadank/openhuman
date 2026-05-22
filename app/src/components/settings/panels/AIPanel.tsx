@@ -598,7 +598,7 @@ const isCalendarConnection = (connection: ComposioConnection): boolean => {
 };
 
 function describeProvider(ref: ProviderRef, providers: CloudProvider[]): string {
-  if (ref.kind === 'openhuman') return 'OpenHuman';
+  if (ref.kind === 'openhuman') return 'Primary provider (auto)';
   if (ref.kind === 'local') return `Local ${ref.model}`;
   const provider = providers.find(p => p.slug === ref.providerSlug);
   return `${provider?.label ?? ref.providerSlug} ${ref.model || 'custom model'}`;
@@ -1203,7 +1203,7 @@ const WorkloadRow = ({
 
   let resolved: string;
   if (ref_.kind === 'openhuman') {
-    resolved = 'OpenHuman (default)';
+    resolved = 'Primary provider (auto)';
   } else if (ref_.kind === 'cloud') {
     if (!selectedCloud) resolved = `${ref_.providerSlug} · ${ref_.model}`;
     else resolved = `${selectedCloud.label} · ${ref_.model}`;
@@ -1627,7 +1627,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
       if (JSON.stringify(a) !== JSON.stringify(b)) {
         const describe = (r: ProviderRef) =>
           r.kind === 'openhuman'
-            ? 'openhuman'
+            ? 'auto'
             : r.kind === 'cloud'
               ? `${r.providerSlug}:${r.model}`
               : `local:${r.model}`;
@@ -1833,7 +1833,10 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
 
             <div className="text-[11px] text-stone-500 dark:text-neutral-400">
               {t('settings.ai.defaultResolvesTo')}{' '}
-              <span className="font-mono text-stone-700 dark:text-neutral-200">OpenHuman</span>.
+              <span className="font-mono text-stone-700 dark:text-neutral-200">
+                first configured provider
+              </span>
+              .
             </div>
           </section>
         </div>

@@ -54,47 +54,46 @@ fn anthropic_entry(id: &str, slug: &str) -> CloudProviderCreds {
 
 #[test]
 fn openhuman_literal_errors_in_local_fork() {
-    // In the local-OAuth fork the OpenHuman backend is gone; the
-    // sentinel must hard-error with a pointer at Settings → AI so
-    // the user knows where to configure their own provider.
+    // Bare "openhuman" (no colon) is the legacy Default-routing sentinel the
+    // frontend wrote before the serializer was fixed to emit "".  It should
+    // produce a clear "no provider configured" error pointing at Settings → AI.
     let config = Config::default();
     let err = create_chat_provider_from_string("reasoning", "openhuman", &config)
         .err()
         .expect("must error");
     assert!(
-        err.to_string()
-            .contains("OpenHuman backend provider is not available"),
-        "expected backend-removed error, got: {err}"
+        err.to_string().contains("Settings") && err.to_string().contains("AI"),
+        "expected actionable 'Settings → AI' error, got: {err}"
     );
 }
 
 #[test]
 fn cloud_no_providers_errors_in_local_fork() {
-    // With no cloud_providers configured, "cloud" sentinel falls
-    // through to the same OpenHuman-backend hard error.
+    // "cloud" with no cloud_providers configured falls through to the same
+    // "no provider" error path.
     let config = Config::default();
     let err = create_chat_provider_from_string("reasoning", "cloud", &config)
         .err()
         .expect("must error");
     assert!(
-        err.to_string()
-            .contains("OpenHuman backend provider is not available"),
-        "expected backend-removed error, got: {err}"
+        err.to_string().contains("Settings") && err.to_string().contains("AI"),
+        "expected actionable 'Settings → AI' error, got: {err}"
     );
 }
 
 #[test]
-fn openhuman_slug_errors_in_local_fork() {
-    // `openhuman:<model>` used to route to the backend provider.
-    // After the local-OAuth refactor it must hard-error too.
+fn openhuman_slug_no_model_errors() {
+    // "openhuman:" (slug with no model, no default_model on the entry) must
+    // fail at factory-build time with a clear "no model specified" message
+    // rather than passing through to produce a provider that immediately
+    // 400s on the first API call.
     let config = config_with_providers(vec![oh_entry("p_oh")]);
     let err = create_chat_provider_from_string("reasoning", "openhuman:", &config)
         .err()
         .expect("must error");
     assert!(
-        err.to_string()
-            .contains("OpenHuman backend provider is not available"),
-        "expected backend-removed error, got: {err}"
+        err.to_string().contains("no model specified"),
+        "expected 'no model specified' error, got: {err}"
     );
 }
 
@@ -161,9 +160,13 @@ async fn ollama_provider_does_not_require_api_key() {
 }
 
 #[test]
-fn all_workloads_default_to_openhuman() {
+fn all_workloads_default_to_empty_when_no_providers() {
+    // With no cloud_providers configured, every role that has no explicit
+    // override resolves to "" so the factory falls through to the
+    // "No LLM provider configured" error path.
     let config = Config::default();
     for role in &[
+        "chat",
         "reasoning",
         "agentic",
         "coding",
@@ -175,8 +178,8 @@ fn all_workloads_default_to_openhuman() {
     ] {
         assert_eq!(
             provider_for_role(role, &config),
-            "openhuman",
-            "role={role} must default to openhuman"
+            "",
+            "role={role} must resolve to empty string when no providers are configured"
         );
     }
 }
@@ -189,7 +192,7 @@ fn workload_override_respected() {
         provider_for_role("heartbeat", &config),
         "ollama:llama3.2:3b"
     );
-    assert_eq!(provider_for_role("reasoning", &config), "openhuman");
+    assert_eq!(provider_for_role("reasoning", &config), "");
 }
 
 #[test]
@@ -321,18 +324,16 @@ async fn cloud_provider_with_malformed_endpoint_surfaces_url_error() {
 }
 
 #[test]
-fn primary_cloud_with_no_providers_errors_in_local_fork() {
+fn primary_cloud_with_no_providers_errors_with_settings_pointer() {
     // No cloud_providers, no primary_cloud, no workload override —
-    // factory must error with the backend-removed pointer rather
-    // than silently return the dead OpenHumanBackendProvider.
+    // factory must error with an actionable pointer to Settings → AI.
     let config = Config::default();
     let err = create_chat_provider("reasoning", &config)
         .err()
         .expect("must error");
     assert!(
-        err.to_string()
-            .contains("OpenHuman backend provider is not available"),
-        "expected backend-removed error, got: {err}"
+        err.to_string().contains("Settings") && err.to_string().contains("AI"),
+        "expected actionable 'Settings → AI' error, got: {err}"
     );
 }
 
@@ -349,20 +350,19 @@ fn summarization_aliases_memory_provider() {
 }
 
 #[test]
-fn summarization_defaults_to_openhuman_like_memory() {
+fn summarization_defaults_to_empty_like_memory() {
     let config = Config::default();
-    assert_eq!(provider_for_role("memory", &config), "openhuman");
-    assert_eq!(provider_for_role("summarization", &config), "openhuman");
+    assert_eq!(provider_for_role("memory", &config), "");
+    assert_eq!(provider_for_role("summarization", &config), "");
 }
 
 #[test]
-fn unknown_workload_falls_back_to_openhuman() {
+fn unknown_workload_falls_back_to_empty() {
+    // Unknown roles hit the _ => None arm; with no cloud_providers they
+    // resolve to "" which the factory treats as "no provider".
     let config = Config::default();
-    assert_eq!(
-        provider_for_role("nope-not-a-workload", &config),
-        "openhuman"
-    );
-    assert_eq!(provider_for_role("", &config), "openhuman");
+    assert_eq!(provider_for_role("nope-not-a-workload", &config), "");
+    assert_eq!(provider_for_role("", &config), "");
 }
 
 // The `openhuman_backend_uses_config_path_parent_as_state_dir` test

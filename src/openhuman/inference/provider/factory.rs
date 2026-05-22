@@ -39,6 +39,7 @@ pub fn auth_key_for_slug(slug: &str) -> String {
 ///
 pub fn provider_for_role(role: &str, config: &Config) -> String {
     let opt = match role {
+        "chat" => config.chat_provider.as_deref(),
         "reasoning" => config.reasoning_provider.as_deref(),
         "agentic" => config.agentic_provider.as_deref(),
         "coding" => config.coding_provider.as_deref(),
@@ -55,7 +56,10 @@ pub fn provider_for_role(role: &str, config: &Config) -> String {
         _ => None,
     };
     let s = opt.unwrap_or("").trim();
-    if s.is_empty() || s == "cloud" {
+    // "openhuman" is the legacy sentinel written by the frontend's Default
+    // routing toggle; treat it identically to empty/cloud so it falls through
+    // to the primary-provider resolution below rather than erroring.
+    if s.is_empty() || s == "cloud" || s == "openhuman" {
         // When no explicit per-workload provider is set, resolve
         // primary_cloud. If it is missing or stale, fall back to the
         // first configured provider (typically the migration-seeded
@@ -108,7 +112,10 @@ pub fn create_chat_provider_from_string(
         p
     );
 
-    if p.is_empty() || p == "cloud" {
+    // "openhuman" (bare, no colon) is the legacy Default-routing sentinel
+    // written by older versions of the frontend. Treat it the same as an
+    // unconfigured field — no backend exists to service it.
+    if p.is_empty() || p == "cloud" || p == "openhuman" {
         anyhow::bail!("No LLM provider configured. Add a provider under Settings → AI.");
     }
 
@@ -236,6 +243,15 @@ fn make_cloud_provider_by_slug(
     } else {
         model.to_string()
     };
+    if effective_model.is_empty() {
+        anyhow::bail!(
+            "[chat-factory] no model specified for provider '{}' (role '{}') — \
+             set a model in the workload routing (e.g. '{slug}:gpt-4o') or add a \
+             default_model to the provider config",
+            slug,
+            role
+        );
+    }
 
     log::info!(
         "[providers][chat-factory] role={} slug={} model={} endpoint_host={}",

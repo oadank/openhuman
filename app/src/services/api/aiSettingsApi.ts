@@ -129,7 +129,9 @@ export function parseProviderString(s: string | null | undefined): ProviderRef {
 export function serializeProviderRef(ref: ProviderRef): string {
   switch (ref.kind) {
     case 'openhuman':
-      return 'openhuman';
+      // Emit "" (empty) so the Rust factory's primary-provider fallback
+      // triggers instead of hitting the "openhuman" literal sentinel path.
+      return '';
     case 'cloud':
       return `${ref.providerSlug}:${ref.model}`;
     case 'local':
