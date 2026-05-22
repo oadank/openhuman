@@ -4680,7 +4680,6 @@ async fn whatsapp_memory_doc_ingest_e2e() {
     rpc_join.abort();
 }
 
-
 #[tokio::test]
 async fn json_rpc_meet_join_call_validates_and_returns_request_id() {
     let _env_lock = json_rpc_e2e_env_lock();
@@ -5229,7 +5228,10 @@ encrypt = false
     );
     // error_type must be present and non-empty (anything is better than a
     // silent generic error with no type).
-    let error_type = event.get("error_type").and_then(Value::as_str).unwrap_or("");
+    let error_type = event
+        .get("error_type")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     assert!(
         !error_type.is_empty(),
         "chat_error must carry a non-empty error_type: {event}"
@@ -5348,7 +5350,10 @@ encrypt = false
         "at least one outbound request must be made to the custom provider"
     );
     // The model string must reach the provider without mangling.
-    let outbound_model = requests[0].get("model").and_then(Value::as_str).unwrap_or("");
+    let outbound_model = requests[0]
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or("");
     assert_eq!(
         outbound_model, "gpt-5.4-mini",
         "outbound model must match custom:gpt-5.4-mini; requests={requests:?}"
@@ -5384,8 +5389,8 @@ async fn json_rpc_web_chat_live_custom_endpoint_roundtrip() {
     }
     let base_url = std::env::var("OPENHUMAN_TEST_CUSTOM_URL")
         .unwrap_or_else(|_| "https://api.theclawbay.com/v1".to_string());
-    let model_id = std::env::var("OPENHUMAN_TEST_CUSTOM_MODEL")
-        .unwrap_or_else(|_| "gpt-5.4-mini".to_string());
+    let model_id =
+        std::env::var("OPENHUMAN_TEST_CUSTOM_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
 
     let _env_lock = json_rpc_e2e_env_lock();
     let tmp = tempdir().expect("tempdir");

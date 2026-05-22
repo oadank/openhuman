@@ -602,8 +602,7 @@ async fn custom_bearer_provider_factory_full_chain() {
 
     let _lock = env_lock();
     let tmp = tempdir().expect("tempdir");
-    let _workspace_guard =
-        EnvGuard::set("OPENHUMAN_WORKSPACE", tmp.path().to_str().unwrap());
+    let _workspace_guard = EnvGuard::set("OPENHUMAN_WORKSPACE", tmp.path().to_str().unwrap());
 
     let mut config = Config::default();
     config.workspace_dir = tmp.path().to_path_buf();
@@ -671,8 +670,7 @@ async fn custom_bearer_provider_factory_full_chain() {
 #[tokio::test]
 #[ignore = "live API — set OPENHUMAN_TEST_CUSTOM_KEY and run with --include-ignored"]
 async fn custom_provider_live_chat_roundtrip() {
-    let api_key = std::env::var("OPENHUMAN_TEST_CUSTOM_KEY")
-        .unwrap_or_default();
+    let api_key = std::env::var("OPENHUMAN_TEST_CUSTOM_KEY").unwrap_or_default();
     if api_key.is_empty() {
         eprintln!("[skip] OPENHUMAN_TEST_CUSTOM_KEY is not set");
         return;
@@ -680,13 +678,12 @@ async fn custom_provider_live_chat_roundtrip() {
 
     let base_url = std::env::var("OPENHUMAN_TEST_CUSTOM_URL")
         .unwrap_or_else(|_| "https://api.theclawbay.com/v1".to_string());
-    let model_id = std::env::var("OPENHUMAN_TEST_CUSTOM_MODEL")
-        .unwrap_or_else(|_| "gpt-5.4-mini".to_string());
+    let model_id =
+        std::env::var("OPENHUMAN_TEST_CUSTOM_MODEL").unwrap_or_else(|_| "gpt-5.4-mini".to_string());
 
     let _lock = env_lock();
     let tmp = tempdir().expect("tempdir");
-    let _workspace_guard =
-        EnvGuard::set("OPENHUMAN_WORKSPACE", tmp.path().to_str().unwrap());
+    let _workspace_guard = EnvGuard::set("OPENHUMAN_WORKSPACE", tmp.path().to_str().unwrap());
 
     let mut config = Config::default();
     config.workspace_dir = tmp.path().to_path_buf();
