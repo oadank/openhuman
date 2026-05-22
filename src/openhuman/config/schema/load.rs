@@ -678,6 +678,23 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
     rewrite(&mut config.subconscious_provider);
 }
 
+/// Rewrite `memory.embedding_provider = "cloud"` → `"none"`.
+///
+/// The upstream fork defaulted to `"cloud"` (OpenHuman backend Voyage embeddings).
+/// That backend is gone in closedhuman. Any config.toml still carrying the old
+/// default would cause `memory::factory::create_embedding_provider` to hard-error
+/// at chat-turn time. Migrate to `"none"` (NoopEmbedding) so the chat path stays
+/// alive — the user can enable a real embedder via Settings → AI → Embeddings.
+fn migrate_legacy_cloud_embedding_provider(config: &mut Config) {
+    if config.memory.embedding_provider == "cloud" {
+        tracing::info!(
+            "[config][migrate] rewriting memory.embedding_provider 'cloud' → 'none' \
+             (OpenHuman backend removed in closedhuman fork)"
+        );
+        config.memory.embedding_provider = "none".to_string();
+    }
+}
+
 fn migrate_legacy_autocomplete_disabled_apps(config: &mut Config) {
     // Legacy defaults blocked both terminal and code, which prevented Codex/CLI usage.
     // Migrate only the exact legacy default so custom user preferences remain untouched.
@@ -797,6 +814,7 @@ impl Config {
             config.workspace_dir = workspace_dir;
             migrate_legacy_autocomplete_disabled_apps(&mut config);
             migrate_cloud_provider_slugs(&mut config);
+            migrate_legacy_cloud_embedding_provider(&mut config);
             config.apply_env_overrides_from(env);
 
             if config_was_corrupted {
