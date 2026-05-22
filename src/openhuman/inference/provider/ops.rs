@@ -290,6 +290,86 @@ pub async fn test_configured_provider(
     ))
 }
 
+pub async fn test_raw_endpoint(
+    endpoint: &str,
+    api_key: Option<&str>,
+    model: &str,
+) -> Result<crate::rpc::RpcOutcome<serde_json::Value>, String> {
+    let endpoint = endpoint.trim();
+    let model = model.trim();
+    if endpoint.is_empty() {
+        return Err("endpoint must not be empty".to_string());
+    }
+    if model.is_empty() {
+        return Err("model must not be empty".to_string());
+    }
+
+    log::debug!(
+        "[providers][test_endpoint] endpoint={} model={}",
+        crate::openhuman::inference::provider::factory::redact_endpoint(endpoint),
+        model
+    );
+
+    use crate::openhuman::inference::provider::compatible::{
+        AuthStyle as CompatAuthStyle, OpenAiCompatibleProvider,
+    };
+    use crate::openhuman::inference::provider::traits::Provider;
+
+    let key = api_key.map(str::trim).filter(|k| !k.is_empty());
+    let provider: Box<dyn Provider> = Box::new(OpenAiCompatibleProvider::new(
+        "test_endpoint",
+        endpoint,
+        key,
+        CompatAuthStyle::Bearer,
+    ));
+
+    let started = Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(PROVIDER_TEST_TIMEOUT_SECS),
+        provider.chat_with_system(
+            Some(PROVIDER_TEST_SYSTEM_PROMPT),
+            PROVIDER_TEST_USER_PROMPT,
+            model,
+            0.0,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "endpoint '{}' did not respond within {}s",
+            crate::openhuman::inference::provider::factory::redact_endpoint(endpoint),
+            PROVIDER_TEST_TIMEOUT_SECS
+        )
+    })?
+    .map_err(|e| sanitize_api_error(&format_anyhow_chain(&e)))?;
+
+    let preview = crate::openhuman::util::truncate_with_ellipsis(result.trim(), 160);
+    if preview.is_empty() {
+        return Err(format!(
+            "endpoint '{}' returned an empty response for model '{}'",
+            crate::openhuman::inference::provider::factory::redact_endpoint(endpoint),
+            model
+        ));
+    }
+
+    let report = ProviderTestReport {
+        ok: true,
+        provider_id: String::new(),
+        provider_slug: String::new(),
+        model: model.to_string(),
+        latency_ms: started.elapsed().as_millis(),
+        response_preview: preview,
+    };
+
+    Ok(crate::rpc::RpcOutcome::new(
+        serde_json::to_value(report).map_err(|e| e.to_string())?,
+        vec![format!(
+            "endpoint test completed in {}ms",
+            started.elapsed().as_millis()
+        )],
+    ))
+}
+
 fn find_provider_entry<'a>(
     config: &'a crate::openhuman::config::Config,
     provider_id: &str,

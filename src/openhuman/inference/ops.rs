@@ -218,6 +218,20 @@ pub async fn inference_test_provider(
     result
 }
 
+pub async fn inference_test_endpoint(
+    endpoint: &str,
+    api_key: Option<&str>,
+    model: &str,
+) -> Result<RpcOutcome<Value>, String> {
+    debug!(model, "{LOG_PREFIX} test_endpoint:start");
+    let result = providers::ops::test_raw_endpoint(endpoint, api_key, model).await;
+    match &result {
+        Ok(_) => debug!("{LOG_PREFIX} test_endpoint:ok"),
+        Err(err) => error!(error = %err, "{LOG_PREFIX} test_endpoint:error"),
+    }
+    result
+}
+
 pub async fn inference_device_profile() -> Result<RpcOutcome<Value>, String> {
     debug!("{LOG_PREFIX} device_profile:start");
     let profile = device::detect_device_profile();

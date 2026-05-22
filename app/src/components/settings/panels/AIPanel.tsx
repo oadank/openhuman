@@ -27,6 +27,7 @@ import {
   saveAISettings,
   setCloudProviderKey,
   testCloudProvider,
+  testEndpoint,
 } from '../../../services/api/aiSettingsApi';
 import type { AuthStyle } from '../../../utils/tauriCommands/config';
 import {
@@ -2022,7 +2023,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
             .filter(p => p.id !== (editing === 'new' ? '' : editing.id))
             .map(p => p.slug)}
           onClose={() => setEditing(null)}
-          onSubmit={async (next, apiKey) => {
+          onSubmit={async (next, apiKey, defaultModel) => {
             setBusyAction('save-provider');
             try {
               const id =
@@ -2050,7 +2051,12 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                 editing === 'new'
                   ? [...draft.cloudProviders, upserted]
                   : draft.cloudProviders.map(p => (p.id === editing.id ? upserted : p));
-              setDraft({ ...draft, cloudProviders: list });
+              // If the user set a default model, apply it as the chat default.
+              const chatDefault =
+                defaultModel
+                  ? ({ kind: 'cloud', providerSlug: upserted.slug, model: defaultModel } as const)
+                  : draft.chatDefault;
+              setDraft({ ...draft, cloudProviders: list, chatDefault });
               setEditing(null);
             } finally {
               setBusyAction(null);
@@ -2177,7 +2183,7 @@ const CloudProviderEditor = ({
   initial: CloudProvider | null;
   existingSlugs: string[];
   onClose: () => void;
-  onSubmit: (next: CloudProvider, apiKey: string) => Promise<void> | void;
+  onSubmit: (next: CloudProvider, apiKey: string, defaultModel: string) => Promise<void> | void;
   onClearKey: (slug: string) => Promise<void> | void;
 }) => {
   const { t } = useT();
@@ -2193,9 +2199,32 @@ const CloudProviderEditor = ({
   );
   const [endpoint, setEndpoint] = useState(initial?.endpoint ?? defaultEndpointFor(defaultSlug));
   const [apiKey, setApiKey] = useState('');
+  const [defaultModel, setDefaultModel] = useState('');
   const [saving, setSaving] = useState(false);
+  const [testState, setTestState] = useState<{
+    phase: 'running' | 'success' | 'error';
+    message: string;
+  } | null>(null);
   const isOpenHuman = slug === 'openhuman';
   const hasExistingKey = (initial?.maskedKey ?? '').startsWith('••••');
+
+  const runTest = async () => {
+    const model = defaultModel.trim();
+    if (!model) return;
+    setTestState({ phase: 'running', message: `Testing ${model}…` });
+    try {
+      const result = await testEndpoint(endpoint.trim(), apiKey.trim(), model);
+      setTestState({
+        phase: 'success',
+        message: `✓ ${result.latency_ms}ms — ${result.response_preview.slice(0, 80)}`,
+      });
+    } catch (err) {
+      setTestState({
+        phase: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-4">
@@ -2260,6 +2289,17 @@ const CloudProviderEditor = ({
               placeholder="https://api.example.com/v1"
             />
           </div>
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:text-neutral-400">
+              Default model
+            </label>
+            <input
+              value={defaultModel}
+              onChange={e => setDefaultModel(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 placeholder:text-stone-400 dark:placeholder:text-neutral-500 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
+              placeholder="e.g. gpt-4o, claude-sonnet-4-6"
+            />
+          </div>
           {!isOpenHuman && (
             <div>
               <label className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:text-neutral-400">
@@ -2282,7 +2322,29 @@ const CloudProviderEditor = ({
             </div>
           )}
         </div>
-        <div className="flex items-center justify-end gap-2 border-t border-stone-200 dark:border-neutral-800 px-4 py-3">
+        <div className="border-t border-stone-200 dark:border-neutral-800 px-4 py-3 space-y-2">
+          {testState && (
+            <p
+              className={`truncate text-[11px] ${
+                testState.phase === 'success'
+                  ? 'text-emerald-700 dark:text-emerald-300'
+                  : testState.phase === 'error'
+                    ? 'text-red-600 dark:text-red-300'
+                    : 'text-stone-500 dark:text-neutral-400'
+              }`}
+              title={testState.message}>
+              {testState.message}
+            </p>
+          )}
+          <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => void runTest()}
+            disabled={!defaultModel.trim() || !endpoint.trim() || testState?.phase === 'running'}
+            className="rounded-lg border border-stone-200 dark:border-neutral-800 px-3 py-1.5 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 disabled:opacity-40 disabled:cursor-not-allowed">
+            {testState?.phase === 'running' ? 'Testing…' : 'Test connection'}
+          </button>
+          <div className="flex items-center gap-2">
           <button
             onClick={onClose}
             disabled={saving}
@@ -2302,7 +2364,8 @@ const CloudProviderEditor = ({
                     authStyle: initial?.authStyle ?? authStyleForSlug(slug),
                     maskedKey: maskKeyLabel(hasExistingKey || apiKey.length > 0),
                   },
-                  apiKey.trim()
+                  apiKey.trim(),
+                  defaultModel.trim()
                 );
               } finally {
                 setSaving(false);
@@ -2316,6 +2379,8 @@ const CloudProviderEditor = ({
                 ? t('settings.ai.saveChanges')
                 : t('settings.ai.addProvider')}
           </button>
+          </div>
+          </div>
         </div>
       </div>
     </div>

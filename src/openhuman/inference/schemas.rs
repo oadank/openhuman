@@ -123,6 +123,13 @@ struct InferenceTestProviderParams {
 }
 
 #[derive(Debug, Deserialize)]
+struct InferenceTestEndpointParams {
+    endpoint: String,
+    api_key: Option<String>,
+    model: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct InferenceApplyPresetParams {
     tier: String,
 }
@@ -135,6 +142,7 @@ pub fn all_controller_schemas() -> Vec<ControllerSchema> {
         schemas("update_local_settings"),
         schemas("list_models"),
         schemas("test_provider"),
+        schemas("test_endpoint"),
         schemas("device_profile"),
         schemas("presets"),
         schemas("apply_preset"),
@@ -174,6 +182,10 @@ pub fn all_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: schemas("test_provider"),
             handler: handle_inference_test_provider,
+        },
+        RegisteredController {
+            schema: schemas("test_endpoint"),
+            handler: handle_inference_test_endpoint,
         },
         RegisteredController {
             schema: schemas("device_profile"),
@@ -364,6 +376,17 @@ pub fn schemas(function: &str) -> ControllerSchema {
                     "Opaque id or slug of the provider entry to test.",
                 ),
                 optional_string("model", "Model id to use for the test chat completion."),
+            ],
+            outputs: vec![json_output("result", "Provider test result payload.")],
+        },
+        "test_endpoint" => ControllerSchema {
+            namespace: "inference",
+            function: "test_endpoint",
+            description: "Test a raw endpoint + API key before saving, by sending a probe chat completion request. No stored provider needed.",
+            inputs: vec![
+                required_string("endpoint", "Base URL of the OpenAI-compatible endpoint (e.g. https://api.openai.com/v1)."),
+                optional_string("api_key", "Bearer API key to test with. Omit for auth-free local runtimes."),
+                required_string("model", "Model id to use for the probe completion."),
             ],
             outputs: vec![json_output("result", "Provider test result payload.")],
         },
@@ -695,6 +718,20 @@ fn handle_inference_test_provider(params: Map<String, Value>) -> ControllerFutur
             crate::openhuman::inference::rpc::inference_test_provider(
                 &request.provider_id,
                 request.model.as_deref(),
+            )
+            .await?,
+        )
+    })
+}
+
+fn handle_inference_test_endpoint(params: Map<String, Value>) -> ControllerFuture {
+    Box::pin(async move {
+        let request = deserialize_params::<InferenceTestEndpointParams>(params)?;
+        to_json(
+            crate::openhuman::inference::rpc::inference_test_endpoint(
+                &request.endpoint,
+                request.api_key.as_deref(),
+                &request.model,
             )
             .await?,
         )

@@ -350,6 +350,25 @@ export async function testCloudProvider(
   return res.result;
 }
 
+export async function testEndpoint(
+  endpoint: string,
+  apiKey: string,
+  model: string
+): Promise<ProviderTestResult> {
+  if (!isTauri()) {
+    throw new Error('Provider tests require the desktop app runtime.');
+  }
+  const res = await callCoreRpc<{ result: ProviderTestResult }>({
+    method: 'openhuman.inference_test_endpoint',
+    params: {
+      endpoint,
+      api_key: apiKey || undefined,
+      model,
+    },
+  });
+  return res.result;
+}
+
 // ─── Local provider façade (Ollama install / detect / model manage) ───────
 
 /** Snapshot of the Ollama daemon + installed-model state for the AI panel. */
