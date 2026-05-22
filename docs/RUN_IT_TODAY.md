@@ -27,6 +27,89 @@ scripted equivalents — useful for headless testing, but not required.
 
 ---
 
+## Deployment topologies
+
+There are two ways to run this fork. Choose one before you start.
+
+### In-process mode (local)
+
+The upstream default. `openhuman-core` runs as a tokio task inside the
+Tauri host process — no separate server, no network hop. Suitable for a
+single machine that stays on all day, or for offline-first use.
+
+Selected in `BootCheckGate` on first launch by choosing **Local**.
+
+Trade-offs: the core shuts down when you close the app window; only one
+client at a time; all state lives in `~/.openhuman` on the local machine.
+
+### Server + client mode (cloud) — recommended for this fork
+
+`openhuman-core` runs headless in a Docker container on any reachable
+host (your homelab, a VPS, a second machine on Tailscale). The desktop
+app is a thin client that connects to it over HTTP with a bearer token.
+
+Selected in `BootCheckGate` on first launch by choosing **Cloud**, then
+entering the server URL and bearer token.
+
+Benefits over in-process mode:
+- Core keeps running when the app is closed or the laptop sleeps.
+- Multiple desktop clients (different machines) can connect to the same
+  core instance.
+- Clean separation: state and long-running tasks live on a stable server;
+  the desktop is just a view.
+
+The server exposes port **7788**; the single RPC endpoint is
+`http://<host>:7788/rpc`. The bearer token is written to
+`<workspace>/core.token` inside the container on first start.
+
+---
+
+## Running the server (Docker)
+
+A reference compose file lives at `deploy/node-b/docker-compose.yml` in
+this repo. It defines one service (`openhuman-core`), a named volume
+(`openhuman-workspace` → `/home/openhuman/.openhuman`), and exposes port
+7788.
+
+**Start the server:**
+
+```bash
+# From the directory containing docker-compose.yml
+docker compose up -d
+```
+
+**Get the bearer token** (required to connect the desktop client):
+
+```bash
+docker exec openhuman-core cat /home/openhuman/.openhuman/core.token
+```
+
+**Connect the desktop client:**
+
+1. Launch the Tauri app (`pnpm dev:app`).
+2. On first run, `BootCheckGate` asks how to connect. Choose **Cloud**.
+3. Enter the server URL, e.g. `http://<host>:7788`, and paste the token.
+4. The app validates the connection and proceeds to `/home`.
+
+**Version sync:** the desktop app and the server image must be on the
+same version — the boot check enforces an exact match. App version is in
+`app/package.json`; server version is baked into the image from
+`CARGO_PKG_VERSION` at build time.
+
+**Check server health:**
+
+```bash
+curl http://<host>:7788/health
+```
+
+**View logs:**
+
+```bash
+docker logs openhuman-core
+```
+
+---
+
 ## What the build expects
 
 | Component | How |
