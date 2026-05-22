@@ -6,17 +6,18 @@
 //! - SSE (Server-Sent Events) for real-time event streaming.
 //! - Helper routes for health checks, schema discovery, and Telegram authentication.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use axum::extract::{Query, State, WebSocketUpgrade};
-use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{extract::Request, Json, Router};
+use axum::{Json, Router, extract::Request};
 use serde::Serialize;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 
@@ -276,9 +277,15 @@ async fn dictation_ws_handler(ws: WebSocketUpgrade) -> Response {
 /// 2. `rpc_auth_middleware`   — validates `Authorization: Bearer <token>` on protected paths
 /// 3. `http_request_log_middleware` — logs non-RPC HTTP requests with timing
 pub fn build_core_http_router(socketio_enabled: bool) -> Router {
+    init_http_health_start_time();
+
     let router = Router::new()
         .route("/", get(root_handler))
         .route("/health", get(health_handler))
+        .route("/health/live", get(liveness_handler))
+        .route("/health/ready", get(readiness_handler))
+        .route("/livez", get(liveness_handler))
+        .route("/readyz", get(readiness_handler))
         .route("/schema", get(schema_handler))
         .route("/events", get(events_handler))
         .route("/events/webhooks", get(webhook_events_handler))
@@ -363,9 +370,129 @@ fn with_cors_headers(mut response: Response) -> Response {
     response
 }
 
-/// Handler for the health check endpoint.
+static HTTP_HEALTH_STARTED_AT: OnceLock<Instant> = OnceLock::new();
+
+fn init_http_health_start_time() {
+    let _ = HTTP_HEALTH_STARTED_AT.get_or_init(Instant::now);
+}
+
+fn http_health_uptime_seconds() -> u64 {
+    HTTP_HEALTH_STARTED_AT
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_secs()
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HttpHealthProbe {
+    Liveness,
+    Readiness,
+}
+
+#[derive(Debug, Serialize)]
+struct HttpHealthChecks {
+    process: &'static str,
+    rpc_dispatch: &'static str,
+    rpc_auth: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct HttpHealthEndpoints {
+    liveness: &'static str,
+    readiness: &'static str,
+    rpc: &'static str,
+    schema: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct HttpHealthResponse {
+    ok: bool,
+    service: &'static str,
+    probe: &'static str,
+    status: &'static str,
+    version: &'static str,
+    pid: u32,
+    uptime_seconds: u64,
+    checked_at: String,
+    checks: HttpHealthChecks,
+    endpoints: HttpHealthEndpoints,
+}
+
+fn build_http_health_payload(probe: HttpHealthProbe) -> (StatusCode, HttpHealthResponse) {
+    let rpc_dispatch_ready = all::schema_for_rpc_method("openhuman.health_snapshot").is_some();
+    let rpc_auth_ready = crate::core::auth::get_rpc_token().is_some();
+    let readiness_ok = rpc_dispatch_ready && rpc_auth_ready;
+
+    let ok = match probe {
+        HttpHealthProbe::Liveness => true,
+        HttpHealthProbe::Readiness => readiness_ok,
+    };
+    let status = match probe {
+        HttpHealthProbe::Liveness => "live",
+        HttpHealthProbe::Readiness if readiness_ok => "ready",
+        HttpHealthProbe::Readiness => "not_ready",
+    };
+    let http_status = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (
+        http_status,
+        HttpHealthResponse {
+            ok,
+            service: "openhuman-core",
+            probe: match probe {
+                HttpHealthProbe::Liveness => "liveness",
+                HttpHealthProbe::Readiness => "readiness",
+            },
+            status,
+            version: env!("CARGO_PKG_VERSION"),
+            pid: std::process::id(),
+            uptime_seconds: http_health_uptime_seconds(),
+            checked_at: chrono::Utc::now().to_rfc3339(),
+            checks: HttpHealthChecks {
+                process: "ok",
+                rpc_dispatch: if rpc_dispatch_ready {
+                    "ok"
+                } else {
+                    "not_ready"
+                },
+                rpc_auth: if rpc_auth_ready {
+                    "ok"
+                } else {
+                    "not_configured"
+                },
+            },
+            endpoints: HttpHealthEndpoints {
+                liveness: "/health/live",
+                readiness: "/health/ready",
+                rpc: "/rpc",
+                schema: "/schema",
+            },
+        },
+    )
+}
+
+fn http_health_response(probe: HttpHealthProbe) -> impl IntoResponse {
+    let (status, payload) = build_http_health_payload(probe);
+    (status, Json(payload))
+}
+
+/// Handler for the backwards-compatible health check endpoint.
 async fn health_handler() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({ "ok": true })))
+    http_health_response(HttpHealthProbe::Liveness)
+}
+
+/// Handler for the explicit liveness endpoint consumed by clients.
+async fn liveness_handler() -> impl IntoResponse {
+    http_health_response(HttpHealthProbe::Liveness)
+}
+
+/// Handler for the explicit readiness endpoint consumed before authenticated RPC.
+async fn readiness_handler() -> impl IntoResponse {
+    http_health_response(HttpHealthProbe::Readiness)
 }
 
 /// Handler for the schema discovery endpoint.
@@ -427,6 +554,8 @@ async fn root_handler() -> impl IntoResponse {
             "ok": true,
             "endpoints": {
                 "health": "/health",
+                "liveness": "/health/live",
+                "readiness": "/health/ready",
                 "schema": "/schema",
                 "events": "/events?client_id=<id>",
                 "rpc": "/rpc"
@@ -449,7 +578,7 @@ async fn not_found_handler() -> impl IntoResponse {
         Json(json!({
             "ok": false,
             "error": "not_found",
-            "message": "Route not found. Try /, /health, /schema, or /rpc."
+            "message": "Route not found. Try /, /health/live, /health/ready, /schema, or /rpc."
         })),
     )
 }

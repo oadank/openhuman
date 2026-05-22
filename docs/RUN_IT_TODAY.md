@@ -99,8 +99,18 @@ same version — the boot check enforces an exact match. App version is in
 **Check server health:**
 
 ```bash
-curl http://<host>:7788/health
+curl http://<host>:7788/health/live
+curl http://<host>:7788/health/ready
 ```
+
+`/health/live` is the public liveness probe clients should poll to
+detect a dead or unreachable core. It returns `ok`, `service`, `probe`,
+`status`, `version`, `pid`, `uptime_seconds`, `checked_at`, `checks`,
+and endpoint hints. `/health/ready` returns the same shape but reports
+whether authenticated JSON-RPC is ready (`checks.rpc_dispatch` and
+`checks.rpc_auth`); use it before enabling a desktop, web, or native
+mobile client session. `/health` remains a backwards-compatible
+liveness alias.
 
 **View logs:**
 

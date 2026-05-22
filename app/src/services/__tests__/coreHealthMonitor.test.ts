@@ -1,6 +1,5 @@
 /**
- * Tests for coreHealthMonitor — covers changed lines 17-19, 21-23, 25-29,
- * 31-34, 37, 41-42, 47-50, 53-57, 60-64.
+ * Tests for coreHealthMonitor.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -13,8 +12,22 @@ vi.mock('../../store/index', () => ({
 const setCoreMock = vi.fn((payload: unknown) => ({ type: 'connectivity/setCore', payload }));
 vi.mock('../../store/connectivitySlice', () => ({ setCore: (p: unknown) => setCoreMock(p) }));
 
-const callCoreRpcMock = vi.fn();
-vi.mock('../coreRpcClient', () => ({ callCoreRpc: callCoreRpcMock }));
+const getCoreHttpBaseUrlMock = vi.fn();
+vi.mock('../coreRpcClient', () => ({ getCoreHttpBaseUrl: getCoreHttpBaseUrlMock }));
+
+const fetchMock = vi.fn();
+
+function okHealthResponse(): Response {
+  return { ok: true, status: 200, json: async () => ({ ok: true, status: 'live' }) } as Response;
+}
+
+function healthResponse(status: number): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => ({ ok: false }),
+  } as Response;
+}
 
 /** Flush all pending microtasks (resolved promises). */
 async function flushPromises(): Promise<void> {
@@ -30,15 +43,19 @@ describe('coreHealthMonitor', () => {
     vi.resetModules();
     dispatchMock.mockClear();
     setCoreMock.mockClear();
-    callCoreRpcMock.mockClear();
+    getCoreHttpBaseUrlMock.mockReset();
+    getCoreHttpBaseUrlMock.mockResolvedValue('http://127.0.0.1:7788');
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
-  it('startCoreHealthMonitor probes immediately on start (lines 53-57)', async () => {
-    callCoreRpcMock.mockResolvedValueOnce({});
+  it('startCoreHealthMonitor probes immediately on start', async () => {
+    fetchMock.mockResolvedValueOnce(okHealthResponse());
 
     const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
     startCoreHealthMonitor();
@@ -46,14 +63,15 @@ describe('coreHealthMonitor', () => {
     // Flush micro-tasks so the async probe runs.
     await flushPromises();
 
-    expect(callCoreRpcMock).toHaveBeenCalledWith(
-      expect.objectContaining({ method: 'openhuman.connectivity_diag' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:7788/health/live',
+      expect.objectContaining({ method: 'GET', cache: 'no-store' })
     );
     stopCoreHealthMonitor();
   });
 
-  it('dispatches reachable on successful probe (lines 25-29)', async () => {
-    callCoreRpcMock.mockResolvedValueOnce({});
+  it('dispatches reachable on successful probe', async () => {
+    fetchMock.mockResolvedValueOnce(okHealthResponse());
 
     const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
     startCoreHealthMonitor();
@@ -63,9 +81,9 @@ describe('coreHealthMonitor', () => {
     stopCoreHealthMonitor();
   });
 
-  it('does not dispatch unreachable until FAIL_THRESHOLD consecutive failures (lines 31-34)', async () => {
+  it('does not dispatch unreachable until FAIL_THRESHOLD consecutive failures', async () => {
     // First failure — below threshold (2), should NOT dispatch unreachable yet.
-    callCoreRpcMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+    fetchMock.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
     const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
     startCoreHealthMonitor();
@@ -79,9 +97,9 @@ describe('coreHealthMonitor', () => {
     stopCoreHealthMonitor();
   });
 
-  it('dispatches unreachable after FAIL_THRESHOLD consecutive failures (lines 31-34)', async () => {
+  it('dispatches unreachable after FAIL_THRESHOLD consecutive failures', async () => {
     // Two consecutive failures → should cross the threshold.
-    callCoreRpcMock
+    fetchMock
       .mockRejectedValueOnce(new Error('ECONNREFUSED first'))
       .mockRejectedValueOnce(new Error('ECONNREFUSED second'));
 
@@ -102,8 +120,8 @@ describe('coreHealthMonitor', () => {
     stopCoreHealthMonitor();
   });
 
-  it('is idempotent — second startCoreHealthMonitor call is a no-op (lines 53-54)', async () => {
-    callCoreRpcMock.mockResolvedValue({});
+  it('is idempotent — second startCoreHealthMonitor call is a no-op', async () => {
+    fetchMock.mockResolvedValue(okHealthResponse());
 
     const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
     startCoreHealthMonitor();
@@ -112,30 +130,30 @@ describe('coreHealthMonitor', () => {
     await flushPromises();
 
     // Only 1 probe should have fired.
-    expect(callCoreRpcMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     stopCoreHealthMonitor();
   });
 
-  it('stopCoreHealthMonitor prevents further scheduling (lines 60-64)', async () => {
-    callCoreRpcMock.mockResolvedValue({});
+  it('stopCoreHealthMonitor prevents further scheduling', async () => {
+    fetchMock.mockResolvedValue(okHealthResponse());
 
     const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
     startCoreHealthMonitor();
     await flushPromises();
 
-    const firstCallCount = callCoreRpcMock.mock.calls.length;
+    const firstCallCount = fetchMock.mock.calls.length;
     stopCoreHealthMonitor();
 
     // Advancing time should not trigger another probe.
     vi.advanceTimersByTime(60_000);
     await flushPromises();
 
-    expect(callCoreRpcMock).toHaveBeenCalledTimes(firstCallCount);
+    expect(fetchMock).toHaveBeenCalledTimes(firstCallCount);
   });
 
-  it('schedule picks degraded interval when consecutiveFails > 0 (lines 41-42, 47-50)', async () => {
+  it('schedule picks degraded interval when consecutiveFails > 0', async () => {
     // Make probe fail once so consecutiveFails becomes 1.
-    callCoreRpcMock.mockRejectedValueOnce(new Error('connection refused')).mockResolvedValue({});
+    fetchMock.mockRejectedValueOnce(new Error('connection refused')).mockResolvedValue({});
 
     const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
     startCoreHealthMonitor();
@@ -146,12 +164,12 @@ describe('coreHealthMonitor', () => {
     await flushPromises();
 
     // Second probe should have fired (recovery check).
-    expect(callCoreRpcMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     stopCoreHealthMonitor();
   });
 
-  it('error message is extracted from Error instance (lines 31-34)', async () => {
-    callCoreRpcMock
+  it('error message is extracted from Error instance', async () => {
+    fetchMock
       .mockRejectedValueOnce(new Error('timeout msg'))
       .mockRejectedValueOnce(new Error('timeout msg'));
 
@@ -170,8 +188,8 @@ describe('coreHealthMonitor', () => {
     stopCoreHealthMonitor();
   });
 
-  it('error message falls back to String(err) when not an Error instance (lines 31-34)', async () => {
-    callCoreRpcMock
+  it('error message falls back to String(err) when not an Error instance', async () => {
+    fetchMock
       .mockRejectedValueOnce('plain string error')
       .mockRejectedValueOnce('plain string error');
 
@@ -187,6 +205,27 @@ describe('coreHealthMonitor', () => {
     );
     expect(unreachableCall).toBeDefined();
     expect((unreachableCall![0] as { error: string }).error).toBe('plain string error');
+    stopCoreHealthMonitor();
+  });
+
+  it('falls back to legacy /health when /health/live is unavailable', async () => {
+    fetchMock.mockResolvedValueOnce(healthResponse(404)).mockResolvedValueOnce(okHealthResponse());
+
+    const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
+    startCoreHealthMonitor();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:7788/health/live',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://127.0.0.1:7788/health',
+      expect.objectContaining({ method: 'GET' })
+    );
+    expect(setCoreMock).toHaveBeenCalledWith({ value: 'reachable' });
     stopCoreHealthMonitor();
   });
 });

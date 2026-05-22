@@ -6,8 +6,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    build_http_schema_dump, default_state, invoke_method, is_param_validation_error,
-    params_to_object, parse_json_params, rpc_handler, type_name,
+    HttpHealthProbe, build_http_health_payload, build_http_schema_dump, default_state,
+    invoke_method, is_param_validation_error, params_to_object, parse_json_params, rpc_handler,
+    type_name,
 };
 
 struct EnvVarGuard {
@@ -153,6 +154,49 @@ async fn invoke_health_snapshot_via_registry() {
         .await
         .expect("health snapshot should succeed");
     assert!(result.get("result").is_some());
+}
+
+#[test]
+fn http_liveness_payload_is_client_health_contract() {
+    let (status, payload) = build_http_health_payload(HttpHealthProbe::Liveness);
+    let value = serde_json::to_value(payload).expect("serialize health payload");
+
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["service"], "openhuman-core");
+    assert_eq!(value["probe"], "liveness");
+    assert_eq!(value["status"], "live");
+    assert_eq!(value["checks"]["process"], "ok");
+    assert_eq!(value["endpoints"]["liveness"], "/health/live");
+    assert_eq!(value["endpoints"]["readiness"], "/health/ready");
+    assert!(value["version"].as_str().is_some());
+    assert!(value["pid"].as_u64().is_some());
+    assert!(value["uptime_seconds"].as_u64().is_some());
+    assert!(value["checked_at"].as_str().is_some());
+}
+
+#[test]
+fn http_readiness_payload_reports_rpc_checks() {
+    let (status, payload) = build_http_health_payload(HttpHealthProbe::Readiness);
+    let value = serde_json::to_value(payload).expect("serialize health payload");
+
+    assert!(matches!(
+        status,
+        axum::http::StatusCode::OK | axum::http::StatusCode::SERVICE_UNAVAILABLE
+    ));
+    assert_eq!(value["probe"], "readiness");
+    assert!(matches!(
+        value["status"].as_str(),
+        Some("ready") | Some("not_ready")
+    ));
+    assert!(matches!(
+        value["checks"]["rpc_dispatch"].as_str(),
+        Some("ok") | Some("not_ready")
+    ));
+    assert!(matches!(
+        value["checks"]["rpc_auth"].as_str(),
+        Some("ok") | Some("not_configured")
+    ));
 }
 
 #[tokio::test]
@@ -317,9 +361,11 @@ fn params_to_object_rejects_array() {
 #[test]
 fn params_to_object_rejects_scalars() {
     assert!(params_to_object(json!(42)).unwrap_err().contains("number"));
-    assert!(params_to_object(json!("hi"))
-        .unwrap_err()
-        .contains("string"));
+    assert!(
+        params_to_object(json!("hi"))
+            .unwrap_err()
+            .contains("string")
+    );
     assert!(params_to_object(json!(true)).unwrap_err().contains("bool"));
 }
 
@@ -388,9 +434,9 @@ async fn structured_rpc_error_envelope_passes_through_generic_dispatch() {
     // this is what makes the boundary domain-agnostic. We register a
     // throwaway method-name on a thread-scoped op and confirm the
     // wire-shape carries the `kind`/`thread_id` data verbatim.
+    use axum::Json;
     use axum::body::to_bytes;
     use axum::extract::State;
-    use axum::Json;
 
     let workspace = tempfile::tempdir().expect("workspace tempdir");
     let _env = EnvVarGuard::set_many(vec![(
@@ -423,9 +469,9 @@ async fn structured_rpc_error_envelope_passes_through_generic_dispatch() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn thread_not_found_rpc_error_does_not_report_to_sentry() {
+    use axum::Json;
     use axum::body::to_bytes;
     use axum::extract::State;
-    use axum::Json;
     use sentry::test::TestTransport;
     use tracing::Level;
     use tracing_subscriber::layer::SubscriberExt;

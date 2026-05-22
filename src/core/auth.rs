@@ -18,7 +18,11 @@
 //!
 //! Endpoints exempt from auth (checked by [`rpc_auth_middleware`]):
 //! - `GET /`              — public info page
-//! - `GET /health`        — liveness probe
+//! - `GET /health`        — backwards-compatible liveness probe
+//! - `GET /health/live`   — liveness probe
+//! - `GET /health/ready`  — readiness probe
+//! - `GET /livez`         — conventional liveness alias
+//! - `GET /readyz`        — conventional readiness alias
 //! - `GET /auth/telegram` — external browser callback (carries its own token)
 //! - `GET /schema`        — read-only schema discovery
 //! - `GET /events`        — SSE stream; browser `EventSource` cannot set headers
@@ -33,12 +37,12 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 #[cfg(unix)]
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::OpenOptionsExt as _;
 
-use axum::http::{header, Method, StatusCode};
+use axum::Json;
+use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde_json::json;
 
 static RPC_TOKEN: OnceLock<String> = OnceLock::new();
@@ -52,6 +56,10 @@ static RPC_TOKEN: OnceLock<String> = OnceLock::new();
 const PUBLIC_PATHS: &[&str] = &[
     "/",
     "/health",
+    "/health/live",
+    "/health/ready",
+    "/livez",
+    "/readyz",
     "/auth/telegram",
     "/schema",
     "/events",
@@ -215,6 +223,9 @@ fn write_token_file(path: &Path, token: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt as _;
 
     #[test]
     fn generate_token_produces_64_hex_chars() {
