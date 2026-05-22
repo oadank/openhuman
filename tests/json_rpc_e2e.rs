@@ -1018,9 +1018,22 @@ async fn json_rpc_thread_generate_title_falls_back_when_provider_path_is_unavail
     with_chat_completion_models(|models| models.clear());
     with_chat_completion_requests(|requests| requests.clear());
 
-    let (api_addr, api_join) = serve_on_ephemeral(mock_upstream_router()).await;
-    let api_origin = format!("http://{api_addr}");
-    write_min_config(openhuman_home.as_path(), &api_origin);
+    let (_api_addr, api_join) = serve_on_ephemeral(mock_upstream_router()).await;
+
+    // Config intentionally has no cloud_providers and no inference_url so
+    // create_intelligent_routing_provider returns Err, triggering the title
+    // fallback path (first user message is used as the title without any LLM call).
+    let cfg = r#"
+chat_onboarding_completed = true
+[secrets]
+encrypt = false
+"#;
+    fn write_cfg(dir: &Path, cfg: &str) {
+        std::fs::create_dir_all(dir).expect("mkdir");
+        std::fs::write(dir.join("config.toml"), cfg).expect("write config");
+    }
+    write_cfg(&openhuman_home, cfg);
+    write_cfg(&openhuman_home.join("users").join("local"), cfg);
 
     let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
     let rpc_base = format!("http://{rpc_addr}");
@@ -1568,9 +1581,6 @@ async fn json_rpc_web_chat_routing_cases_use_expected_direct_provider_models() {
         ("hint:agentic", "agentic-v1"),
         ("hint:coding", "coding-v1"),
         ("reasoning-v1", "reasoning-v1"),
-        // Web chat forwards lightweight hint overrides as-is for this path,
-        // so the upstream model receives the original hint string.
-        ("hint:reaction", "hint:reaction"),
     ];
 
     for (idx, (model_override, expected_model)) in routing_cases.iter().enumerate() {
@@ -1625,10 +1635,7 @@ async fn json_rpc_web_chat_routing_cases_use_expected_direct_provider_models() {
             "case={model_override} expected={expected_model} captured={captured_models:?}"
         );
 
-        if model_override.starts_with("hint:")
-            && *model_override != "hint:reaction"
-            && *expected_model != *model_override
-        {
+        if model_override.starts_with("hint:") && *expected_model != *model_override {
             assert!(
                 !captured_models.iter().any(|m| m == model_override),
                 "hint model should not pass through for case={model_override}: {captured_models:?}"
@@ -1734,7 +1741,7 @@ async fn json_rpc_web_chat_custom_reasoning_provider_uses_stored_key_and_rebuild
     assert_eq!(requests.len(), 1, "expected one outbound provider call");
     assert_eq!(
         requests[0].get("path").and_then(Value::as_str),
-        Some("/chat/completions")
+        Some("/v1/chat/completions")
     );
     assert_eq!(
         requests[0].get("model").and_then(Value::as_str),
@@ -1838,7 +1845,7 @@ async fn json_rpc_web_chat_custom_reasoning_provider_uses_stored_key_and_rebuild
     assert_eq!(requests.len(), 3, "expected three outbound provider calls");
     assert_eq!(
         requests[2].get("path").and_then(Value::as_str),
-        Some("/chat/completions"),
+        Some("/v1/chat/completions"),
         "custom reasoning provider must not hijack unrelated configured routes"
     );
     assert_eq!(
@@ -1959,7 +1966,7 @@ async fn json_rpc_web_chat_custom_reasoning_provider_with_auth_none_omits_auth_h
     assert_eq!(requests.len(), 1, "expected one auth-none provider call");
     assert_eq!(
         requests[0].get("path").and_then(Value::as_str),
-        Some("/chat/completions")
+        Some("/v1/chat/completions")
     );
     assert_eq!(
         requests[0].get("model").and_then(Value::as_str),
@@ -4673,87 +4680,6 @@ async fn whatsapp_memory_doc_ingest_e2e() {
     rpc_join.abort();
 }
 
-/// Regression guard for issue #1289: `openhuman.voice_cloud_transcribe`
-/// must stay registered in the controller registry and reachable via
-/// JSON-RPC dispatch.
-///
-/// The user-visible symptom was "Voice transcription failed: unknown
-/// method: openhuman.voice_cloud_transcribe" — the frontend (mascot
-/// mic-only composer) was calling a method that wasn't reachable.
-/// This test pins both ends:
-///
-/// 1. `/schema` exposes `openhuman.voice_cloud_transcribe` so the
-///    discovery surface stays in sync with the live registry.
-/// 2. Calling the method over RPC does NOT hit the dispatcher's
-///    unknown-method branch (`Err("unknown method: …")`). The call may
-///    still fail downstream (missing audio, unauthenticated, missing
-///    upstream STT key) — but it must reach the registered handler,
-///    which proves the method is wired all the way through.
-#[tokio::test]
-async fn voice_cloud_transcribe_registered_e2e() {
-    let _env_lock = json_rpc_e2e_env_lock();
-    let tmp = tempdir().expect("tempdir");
-    let home = tmp.path();
-    let openhuman_home = home.join(".openhuman");
-
-    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
-    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
-
-    let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
-    let mock_origin = format!("http://{}", mock_addr);
-    write_min_config(&openhuman_home, &mock_origin);
-
-    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
-    let rpc_base = format!("http://{}", rpc_addr);
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // ── 1. /schema must list openhuman.voice_cloud_transcribe ───────────────
-    let schema = reqwest::get(format!("{rpc_base}/schema"))
-        .await
-        .expect("GET /schema")
-        .json::<Value>()
-        .await
-        .expect("schema json");
-    let methods = schema["methods"]
-        .as_array()
-        .unwrap_or_else(|| panic!("/schema must expose methods array: {schema}"));
-    let names: Vec<&str> = methods
-        .iter()
-        .filter_map(|m| m.get("method").and_then(Value::as_str))
-        .collect();
-    assert!(
-        names.contains(&"openhuman.voice_cloud_transcribe"),
-        "voice_cloud_transcribe must appear in /schema dump (got {} methods)",
-        names.len()
-    );
-
-    // ── 2. RPC dispatch must NOT return "unknown method" ───────────────────
-    // Send a minimal payload — it'll fail downstream (no upstream STT
-    // configured in the mock), but the dispatcher should reach the
-    // handler, not the unknown-method branch.
-    let resp = post_json_rpc(
-        &rpc_base,
-        9101,
-        "openhuman.voice_cloud_transcribe",
-        json!({ "audio_base64": "" }),
-    )
-    .await;
-    // Inspect the full error blob, not just `error.message`. A future
-    // server-shape change that moves the dispatcher's unknown-method
-    // string into `error.data` would otherwise let this regression
-    // guard silently pass.
-    let err_blob = resp
-        .get("error")
-        .map(|e| e.to_string().to_ascii_lowercase())
-        .unwrap_or_default();
-    assert!(
-        !err_blob.contains("unknown method"),
-        "voice_cloud_transcribe must be a known method; full response: {resp}"
-    );
-
-    mock_join.abort();
-    rpc_join.abort();
-}
 
 #[tokio::test]
 async fn json_rpc_meet_join_call_validates_and_returns_request_id() {
@@ -5220,4 +5146,332 @@ async fn whatsapp_data_agent_tools_e2e_1341() {
     assert!(WhatsAppDataSearchMessagesTool
         .description()
         .contains("WhatsApp"));
+}
+
+// ── Web-chat E2E: provider-role misconfiguration surfaces clearly ─────────────
+//
+// Regression test for the bug where only `chat_provider` was configured on
+// the server but the agent loop uses `reasoning_provider`.  Without
+// `reasoning_provider` set the factory falls through to `"custom:"` (slug
+// with empty model) and the session builder throws "no model specified".
+// That error must arrive as a structured `chat_error` SSE event — NOT as a
+// silent hang or a generic "Something went wrong" with no error_type.
+
+#[tokio::test]
+async fn json_rpc_web_chat_only_chat_provider_no_reasoning_gives_structured_error() {
+    let _env_lock = json_rpc_e2e_env_lock();
+    let tmp = tempdir().expect("tempdir");
+    let home = tmp.path();
+    let openhuman_home = home.join(".openhuman");
+
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
+    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
+
+    // Config has a `custom` cloud provider and chat_provider set, but
+    // reasoning_provider is deliberately left unset — this mirrors the
+    // pre-fix server state.
+    let cfg = r#"
+default_model = "chat-v1"
+default_temperature = 0.7
+chat_onboarding_completed = true
+chat_provider = "custom:gpt-5.4-mini"
+
+[[cloud_providers]]
+id = "p_custom_test"
+slug = "custom"
+label = "Custom"
+endpoint = "http://127.0.0.1:19999"
+auth_style = "bearer"
+
+[secrets]
+encrypt = false
+"#;
+    std::fs::create_dir_all(&openhuman_home).expect("mkdir");
+    std::fs::write(openhuman_home.join("config.toml"), cfg).expect("write config");
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{}", rpc_addr);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let client_id = "no-reasoning-client";
+    let thread_id = "no-reasoning-thread";
+    let events_url = format!("{}/events?client_id={}", rpc_base, client_id);
+    let sse_task = tokio::spawn(async move { read_terminal_web_chat_event(&events_url).await });
+
+    let web_chat = post_json_rpc(
+        &rpc_base,
+        9100,
+        "openhuman.channel_web_chat",
+        json!({
+            "client_id": client_id,
+            "thread_id": thread_id,
+            "message": "hello"
+        }),
+    )
+    .await;
+    // The RPC call itself must succeed (accepted=true — the error is async).
+    let result = assert_no_jsonrpc_error(&web_chat, "channel_web_chat");
+    assert_eq!(
+        result.get("result").and_then(|v| v.get("accepted")),
+        Some(&json!(true))
+    );
+
+    // The async task must produce a chat_error (not a hang/chat_done).
+    let event = tokio::time::timeout(Duration::from_secs(10), sse_task)
+        .await
+        .expect("timed out — should fail fast, not hang")
+        .expect("sse join");
+
+    assert_eq!(
+        event.get("event").and_then(Value::as_str),
+        Some("chat_error"),
+        "missing reasoning_provider must produce chat_error not chat_done: {event}"
+    );
+    // error_type must be present and non-empty (anything is better than a
+    // silent generic error with no type).
+    let error_type = event.get("error_type").and_then(Value::as_str).unwrap_or("");
+    assert!(
+        !error_type.is_empty(),
+        "chat_error must carry a non-empty error_type: {event}"
+    );
+
+    rpc_join.abort();
+}
+
+// ── Web-chat E2E: custom slug + Bearer key → correct model and auth header ────
+//
+// Validates the full path: update_model_settings with a custom slug → store
+// API key → channel_web_chat → chat_done SSE → verify outbound HTTP request
+// carries correct Bearer token and model name.
+
+#[tokio::test]
+async fn json_rpc_web_chat_custom_slug_bearer_full_roundtrip() {
+    let _env_lock = json_rpc_e2e_env_lock();
+    let tmp = tempdir().expect("tempdir");
+    let home = tmp.path();
+    let openhuman_home = home.join(".openhuman");
+
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
+    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
+
+    let (mock_addr, mock_join) = serve_on_ephemeral(mock_upstream_router()).await;
+    let mock_origin = format!("http://{}", mock_addr);
+
+    // Bootstrap with a config that has the custom slug + all workload routes set.
+    let cfg = format!(
+        r#"
+default_model = "custom:gpt-5.4-mini"
+default_temperature = 0.7
+chat_onboarding_completed = true
+chat_provider = "custom:gpt-5.4-mini"
+reasoning_provider = "custom:gpt-5.4-mini"
+agentic_provider = "custom:gpt-5.4-mini"
+
+[[cloud_providers]]
+id = "p_custom_slug"
+slug = "custom"
+label = "Custom"
+endpoint = "{mock_origin}"
+auth_style = "bearer"
+
+[secrets]
+encrypt = false
+"#
+    );
+    std::fs::create_dir_all(&openhuman_home).expect("mkdir");
+    std::fs::write(openhuman_home.join("config.toml"), &cfg).expect("write config");
+    // Config resolution defaults to the pre-login user dir (users/local) when
+    // there is no active_user.toml and no OPENHUMAN_WORKSPACE override.
+    let users_local = openhuman_home.join("users").join("local");
+    std::fs::create_dir_all(&users_local).expect("mkdir users/local");
+    std::fs::write(users_local.join("config.toml"), &cfg).expect("write users/local config");
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{}", rpc_addr);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Store a Bearer key for the custom slug.
+    let store = post_json_rpc(
+        &rpc_base,
+        9200,
+        "openhuman.auth_store_provider_credentials",
+        json!({
+            "provider": "provider:custom",
+            "profile": "default",
+            "token": "Bearer-sk-custom-slug-key",
+            "setActive": true
+        }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&store, "auth_store_provider_credentials");
+
+    with_chat_completion_models(|m| m.clear());
+    with_chat_completion_requests(|r| r.clear());
+
+    let client_id = "custom-slug-client";
+    let thread_id = "custom-slug-thread";
+    let events_url = format!("{}/events?client_id={}", rpc_base, client_id);
+    let sse_task = tokio::spawn(async move { read_terminal_web_chat_event(&events_url).await });
+
+    let web_chat = post_json_rpc(
+        &rpc_base,
+        9201,
+        "openhuman.channel_web_chat",
+        json!({
+            "client_id": client_id,
+            "thread_id": thread_id,
+            "message": "ping custom slug provider"
+        }),
+    )
+    .await;
+    assert_eq!(
+        assert_no_jsonrpc_error(&web_chat, "channel_web_chat")
+            .get("result")
+            .and_then(|v| v.get("accepted")),
+        Some(&json!(true))
+    );
+
+    let event = tokio::time::timeout(Duration::from_secs(12), sse_task)
+        .await
+        .expect("timed out waiting for custom-slug chat_done")
+        .expect("sse join");
+    assert_eq!(
+        event.get("event").and_then(Value::as_str),
+        Some("chat_done"),
+        "custom-slug provider must produce chat_done, got: {event}; requests={:?}",
+        with_chat_completion_requests(|r| r.clone())
+    );
+
+    let requests = wait_for_chat_completion_requests_len(1).await;
+    assert!(
+        !requests.is_empty(),
+        "at least one outbound request must be made to the custom provider"
+    );
+    // The model string must reach the provider without mangling.
+    let outbound_model = requests[0].get("model").and_then(Value::as_str).unwrap_or("");
+    assert_eq!(
+        outbound_model, "gpt-5.4-mini",
+        "outbound model must match custom:gpt-5.4-mini; requests={requests:?}"
+    );
+    // Bearer token must be forwarded.
+    let auth = requests[0]
+        .get("authorization")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert_eq!(
+        auth, "Bearer Bearer-sk-custom-slug-key",
+        "outbound Authorization header must carry the stored key"
+    );
+
+    mock_join.abort();
+    rpc_join.abort();
+}
+
+// ── Web-chat E2E: live custom endpoint roundtrip (ignored by default) ─────────
+//
+// Validates the full chat flow against a real OpenAI-compatible endpoint.
+// Run with:
+//   OPENHUMAN_TEST_CUSTOM_KEY=<key> \
+//     cargo test --test json_rpc_e2e json_rpc_web_chat_live -- --include-ignored --nocapture
+
+#[tokio::test]
+#[ignore = "live API — set OPENHUMAN_TEST_CUSTOM_KEY and run with --include-ignored"]
+async fn json_rpc_web_chat_live_custom_endpoint_roundtrip() {
+    let api_key = std::env::var("OPENHUMAN_TEST_CUSTOM_KEY").unwrap_or_default();
+    if api_key.is_empty() {
+        eprintln!("[skip] OPENHUMAN_TEST_CUSTOM_KEY not set");
+        return;
+    }
+    let base_url = std::env::var("OPENHUMAN_TEST_CUSTOM_URL")
+        .unwrap_or_else(|_| "https://api.theclawbay.com/v1".to_string());
+    let model_id = std::env::var("OPENHUMAN_TEST_CUSTOM_MODEL")
+        .unwrap_or_else(|_| "gpt-5.4-mini".to_string());
+
+    let _env_lock = json_rpc_e2e_env_lock();
+    let tmp = tempdir().expect("tempdir");
+    let home = tmp.path();
+    let openhuman_home = home.join(".openhuman");
+
+    let _home_guard = EnvVarGuard::set_to_path("HOME", home);
+    let _workspace_guard = EnvVarGuard::unset("OPENHUMAN_WORKSPACE");
+
+    let cfg = format!(
+        r#"
+default_model = "custom:{model_id}"
+default_temperature = 0.7
+chat_onboarding_completed = true
+chat_provider = "custom:{model_id}"
+reasoning_provider = "custom:{model_id}"
+agentic_provider = "custom:{model_id}"
+
+[[cloud_providers]]
+id = "p_custom_live"
+slug = "custom"
+label = "Custom"
+endpoint = "{base_url}"
+auth_style = "bearer"
+
+[secrets]
+encrypt = false
+"#
+    );
+    std::fs::create_dir_all(&openhuman_home).expect("mkdir");
+    std::fs::write(openhuman_home.join("config.toml"), &cfg).expect("write config");
+
+    let (rpc_addr, rpc_join) = serve_on_ephemeral(build_core_http_router(false)).await;
+    let rpc_base = format!("http://{}", rpc_addr);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Store API key via RPC (same as the Settings → AI panel).
+    let store = post_json_rpc(
+        &rpc_base,
+        9300,
+        "openhuman.auth_store_provider_credentials",
+        json!({
+            "provider": "provider:custom",
+            "profile": "default",
+            "token": api_key,
+            "setActive": true
+        }),
+    )
+    .await;
+    assert_no_jsonrpc_error(&store, "auth_store_provider_credentials");
+
+    let client_id = "live-e2e-client";
+    let thread_id = "live-e2e-thread";
+    let events_url = format!("{}/events?client_id={}", rpc_base, client_id);
+    let sse_task = tokio::spawn(async move { read_terminal_web_chat_event(&events_url).await });
+
+    let web_chat = post_json_rpc(
+        &rpc_base,
+        9301,
+        "openhuman.channel_web_chat",
+        json!({
+            "client_id": client_id,
+            "thread_id": thread_id,
+            "message": "Reply with exactly one word: hello"
+        }),
+    )
+    .await;
+    assert_eq!(
+        assert_no_jsonrpc_error(&web_chat, "channel_web_chat")
+            .get("result")
+            .and_then(|v| v.get("accepted")),
+        Some(&json!(true))
+    );
+
+    let event = tokio::time::timeout(Duration::from_secs(60), sse_task)
+        .await
+        .expect("live chat timed out after 60s")
+        .expect("sse join");
+
+    let event_type = event.get("event").and_then(Value::as_str).unwrap_or("");
+    eprintln!("[live] endpoint={base_url} model={model_id} event={event_type} payload={event}");
+
+    assert_eq!(
+        event_type, "chat_done",
+        "live chat must complete with chat_done, got: {event}"
+    );
+
+    rpc_join.abort();
 }

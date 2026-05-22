@@ -8,7 +8,14 @@
 //! The `/v1/chat/completions` and `/v1/models` HTTP endpoint tests verify the
 //! full axum router layer (auth middleware + provider routing) end-to-end.
 //!
-//! No live LLM API calls are made.
+//! Tests 15–16 exercise the **full factory chain**: Config + auth-profile key
+//! lookup → `create_chat_provider` → `OpenAiCompatibleProvider`. Test 16 is a
+//! live endpoint test (marked `#[ignore]`) — run it with:
+//!
+//! ```text
+//! OPENHUMAN_TEST_CUSTOM_KEY=<key> cargo test --test inference_provider_e2e \
+//!     custom_provider_live -- --include-ignored
+//! ```
 
 use std::sync::{Mutex, OnceLock};
 
@@ -22,9 +29,15 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use openhuman_core::core::auth::{init_rpc_token, CORE_TOKEN_ENV_VAR};
 use openhuman_core::core::jsonrpc::build_core_http_router;
+use openhuman_core::openhuman::config::schema::cloud_providers::{
+    AuthStyle as ConfigAuthStyle, CloudProviderCreds,
+};
+use openhuman_core::openhuman::config::Config;
+use openhuman_core::openhuman::credentials::AuthService;
 use openhuman_core::openhuman::inference::provider::compatible::{
     AuthStyle, OpenAiCompatibleProvider,
 };
+use openhuman_core::openhuman::inference::provider::factory::create_chat_provider;
 use openhuman_core::openhuman::inference::provider::traits::{ChatMessage, Provider};
 
 // ── Environment serialisation lock ───────────────────────────────────────────
@@ -546,7 +559,6 @@ async fn openai_compat_bearer_auth_sends_authorization_header() {
 
 #[test]
 fn temperature_helper_suppresses_o1_by_default_config() {
-    use openhuman_core::openhuman::config::Config;
     use openhuman_core::openhuman::inference::provider::temperature::temperature_for_model;
 
     let config = Config::default();
@@ -566,4 +578,156 @@ fn temperature_helper_suppresses_o1_by_default_config() {
     assert_eq!(temperature_for_model("o3-mini", 0.7, &config), None);
     assert_eq!(temperature_for_model("o4-turbo", 0.7, &config), None);
     assert_eq!(temperature_for_model("gpt-5-turbo", 0.7, &config), None);
+}
+
+// ── Test 15: full factory chain — custom Bearer provider via wiremock ─────────
+//
+// Exercises: Config → provider_for_role → create_chat_provider →
+//   AuthService key lookup → OpenAiCompatibleProvider (Bearer) → HTTP call.
+// Uses wiremock so no live API key is needed.
+
+#[tokio::test]
+async fn custom_bearer_provider_factory_full_chain() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .and(wm_header("authorization", "Bearer test-custom-key-15"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(openai_chat_response("Custom provider works!")),
+        )
+        .mount(&server)
+        .await;
+
+    let _lock = env_lock();
+    let tmp = tempdir().expect("tempdir");
+    let _workspace_guard =
+        EnvGuard::set("OPENHUMAN_WORKSPACE", tmp.path().to_str().unwrap());
+
+    let mut config = Config::default();
+    config.workspace_dir = tmp.path().to_path_buf();
+    config.config_path = tmp.path().join("config.toml");
+    config.chat_provider = Some("custom:gpt-5.4-mini".to_string());
+    config.cloud_providers.push(CloudProviderCreds {
+        id: "p_custom_test".to_string(),
+        slug: "custom".to_string(),
+        label: "Custom".to_string(),
+        endpoint: format!("{}/v1", server.uri()),
+        auth_style: ConfigAuthStyle::Bearer,
+        ..Default::default()
+    });
+
+    // Store the API key in auth-profiles.json under the workspace dir.
+    let auth = AuthService::from_config(&config);
+    auth.store_provider_token(
+        "provider:custom",
+        "default",
+        "test-custom-key-15",
+        Default::default(),
+        true,
+    )
+    .expect("store provider token");
+
+    // Build provider via the full factory (same path the core uses at runtime).
+    let (provider, model) =
+        create_chat_provider("chat", &config).expect("create_chat_provider must succeed");
+    assert_eq!(model, "gpt-5.4-mini");
+
+    let result = provider
+        .chat_with_system(None, "Are you working?", &model, 0.7)
+        .await
+        .expect("chat_with_system should succeed");
+    assert_eq!(result, "Custom provider works!");
+
+    // Verify request shape.
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "exactly one HTTP request should be made");
+    let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(
+        body["model"].as_str().unwrap(),
+        "gpt-5.4-mini",
+        "model field in request body must match"
+    );
+    assert!(
+        body.get("messages").is_some(),
+        "messages array must be present"
+    );
+}
+
+// ── Test 16: live endpoint validation (ignored by default) ────────────────────
+//
+// Hits the real custom OpenAI-compatible endpoint to confirm the full inference
+// path works without rebuilding the server.
+//
+// Run manually:
+//   OPENHUMAN_TEST_CUSTOM_KEY=<key> \
+//     cargo test --test inference_provider_e2e custom_provider_live -- --include-ignored
+//
+// The test also accepts a custom base URL via OPENHUMAN_TEST_CUSTOM_URL
+// (default: https://api.theclawbay.com/v1) and model via
+// OPENHUMAN_TEST_CUSTOM_MODEL (default: gpt-5.4-mini).
+
+#[tokio::test]
+#[ignore = "live API — set OPENHUMAN_TEST_CUSTOM_KEY and run with --include-ignored"]
+async fn custom_provider_live_chat_roundtrip() {
+    let api_key = std::env::var("OPENHUMAN_TEST_CUSTOM_KEY")
+        .unwrap_or_default();
+    if api_key.is_empty() {
+        eprintln!("[skip] OPENHUMAN_TEST_CUSTOM_KEY is not set");
+        return;
+    }
+
+    let base_url = std::env::var("OPENHUMAN_TEST_CUSTOM_URL")
+        .unwrap_or_else(|_| "https://api.theclawbay.com/v1".to_string());
+    let model_id = std::env::var("OPENHUMAN_TEST_CUSTOM_MODEL")
+        .unwrap_or_else(|_| "gpt-5.4-mini".to_string());
+
+    let _lock = env_lock();
+    let tmp = tempdir().expect("tempdir");
+    let _workspace_guard =
+        EnvGuard::set("OPENHUMAN_WORKSPACE", tmp.path().to_str().unwrap());
+
+    let mut config = Config::default();
+    config.workspace_dir = tmp.path().to_path_buf();
+    config.config_path = tmp.path().join("config.toml");
+    config.chat_provider = Some(format!("custom:{model_id}"));
+    config.cloud_providers.push(CloudProviderCreds {
+        id: "p_custom_live".to_string(),
+        slug: "custom".to_string(),
+        label: "Custom".to_string(),
+        endpoint: base_url.clone(),
+        auth_style: ConfigAuthStyle::Bearer,
+        ..Default::default()
+    });
+
+    let auth = AuthService::from_config(&config);
+    auth.store_provider_token(
+        "provider:custom",
+        "default",
+        &api_key,
+        Default::default(),
+        true,
+    )
+    .expect("store provider token");
+
+    let (provider, model) =
+        create_chat_provider("chat", &config).expect("create_chat_provider must succeed");
+    assert_eq!(model, model_id);
+
+    let result = provider
+        .chat_with_system(
+            Some("You are a test harness. Reply with exactly one word: pong"),
+            "ping",
+            &model,
+            0.7,
+        )
+        .await
+        .expect("live chat should succeed");
+
+    assert!(
+        !result.is_empty(),
+        "live chat response must be non-empty; endpoint={base_url} model={model}"
+    );
+    eprintln!("[live] endpoint={base_url} model={model} response={result:?}");
 }

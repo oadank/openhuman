@@ -9,6 +9,7 @@ when:
         - Cargo.lock
         - rust-toolchain.toml
         - src/**
+        - tests/**
   - event: manual
 
 # Skip submodule init: tauri-cef/tauri-plugin-notification are desktop-only;
@@ -20,6 +21,17 @@ clone:
       recursive: false
 
 steps:
+  - name: run-tests
+    image: rust:1.93-bookworm
+    commands:
+      - apt-get update -qq && apt-get install -y --no-install-recommends
+          build-essential cmake pkg-config libssl-dev libasound2-dev
+          libxdo-dev libxtst-dev libx11-dev libevdev-dev clang mold
+          ca-certificates git >/dev/null
+      - cargo test --test inference_provider_e2e --test json_rpc_e2e 2>&1
+    when:
+      - event: [push, manual]
+
   - name: build-and-push
     image: woodpeckerci/plugin-docker-buildx
     settings:
