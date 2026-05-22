@@ -13,6 +13,7 @@ import AppBackground from './components/AppBackground';
 import BootCheckGate from './components/BootCheckGate/BootCheckGate';
 import BottomTabBar from './components/BottomTabBar';
 import CommandProvider from './components/commands/CommandProvider';
+import ConnectivityBanner from './components/ConnectivityBanner';
 import ServiceBlockingGate from './components/daemon/ServiceBlockingGate';
 import DictationHotkeyManager from './components/DictationHotkeyManager';
 import ErrorFallbackScreen from './components/ErrorFallbackScreen';
@@ -212,6 +213,7 @@ function AppShell() {
     <div className="relative h-screen flex flex-col overflow-hidden">
       <AppBackground />
       <div className="relative z-10 flex-1 flex flex-col overflow-hidden">
+        <ConnectivityBanner />
         <div
           className={`flex-1 overflow-y-auto ${
             // [#1123] welcomeLocked removed — welcome-agent onboarding replaced by Joyride walkthrough
