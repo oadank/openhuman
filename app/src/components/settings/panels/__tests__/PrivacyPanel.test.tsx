@@ -29,11 +29,7 @@ const annotated: Capability = {
   description: 'Send typed messages to the assistant in a conversation.',
   how_to: 'Conversations > Message composer',
   status: 'stable',
-  privacy: {
-    leaves_device: true,
-    data_kind: 'derived',
-    destinations: ['Configured LLM provider'],
-  },
+  privacy: { leaves_device: true, data_kind: 'derived', destinations: ['Configured LLM provider'] },
 };
 
 const localOnly: Capability = {

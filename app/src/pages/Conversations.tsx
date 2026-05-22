@@ -1812,8 +1812,7 @@ const Conversations = ({ variant = 'page', composer = 'text' }: ConversationsPro
 
         <div className="flex-shrink-0 border-t border-stone-200 dark:border-neutral-800 px-4 py-3">
           {/* [#1123] welcomeLocked and welcomePending guards removed — Joyride walkthrough replaced welcome-agent */}
-          <>
-          </>
+          <></>
 
           {sendAdvisory && (
             <div className="flex items-center justify-between mb-2">

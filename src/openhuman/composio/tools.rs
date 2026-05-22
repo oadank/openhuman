@@ -345,11 +345,9 @@ impl Tool for ComposioListToolkitsTool {
                     serde_json::to_string(&resp).unwrap_or_else(|_| "{}".into()),
                 ))
             }
-            Err(e) => {
-                Ok(ToolResult::error(format!(
-                    "composio_list_toolkits failed: {e}"
-                )))
-            }
+            Err(e) => Ok(ToolResult::error(format!(
+                "composio_list_toolkits failed: {e}"
+            ))),
         }
     }
 }
@@ -675,9 +673,8 @@ impl Tool for ComposioListToolsTool {
         };
         if scope.is_empty() {
             let resp = ComposioToolsResponse::default();
-            let mut result = ToolResult::success(
-                serde_json::to_string(&resp).unwrap_or_else(|_| "{}".into()),
-            );
+            let mut result =
+                ToolResult::success(serde_json::to_string(&resp).unwrap_or_else(|_| "{}".into()));
             if options.prefer_markdown {
                 result.markdown_formatted = Some(render_tools_markdown(&resp));
             }

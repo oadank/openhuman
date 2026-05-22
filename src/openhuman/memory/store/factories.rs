@@ -58,9 +58,7 @@ fn report_ollama_health_gate_once(base_url: &str) -> bool {
     // Tags are indexed and grouped on; keep them low-cardinality and free of
     // credentials. Full URL stays in the message body for diagnostics.
     let host_tag = redact_ollama_host(base_url);
-    let message = format!(
-        "ollama embeddings configured but daemon unreachable at {base_url}"
-    );
+    let message = format!("ollama embeddings configured but daemon unreachable at {base_url}");
     // Call report_error_message directly to avoid a redundant format!("{:#}") round-trip
     // that report_error would perform on an already-formatted &str.
     crate::core::observability::report_error_message(

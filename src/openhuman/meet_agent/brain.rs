@@ -331,8 +331,7 @@ async fn llm_meeting(prompt: &str, history: &[ConversationTurn]) -> Result<Strin
     use crate::openhuman::inference::provider::{create_chat_provider, ChatMessage};
 
     let config = crate::openhuman::config::ops::load_config_with_timeout().await?;
-    let (provider, model) =
-        create_chat_provider("agentic", &config).map_err(|e| e.to_string())?;
+    let (provider, model) = create_chat_provider("agentic", &config).map_err(|e| e.to_string())?;
 
     let mut messages: Vec<ChatMessage> = Vec::with_capacity(history.len() + 2);
     messages.push(ChatMessage::system(MEETING_SYSTEM_PROMPT));

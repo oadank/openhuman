@@ -4,13 +4,13 @@
 //! Composio calls now use the user's own Composio API key against the
 //! public Composio v3 API via [`crate::openhuman::tools::ComposioTool`].
 
-use std::sync::Arc;
 use super::types::{
     ComposioActiveTrigger, ComposioActiveTriggersResponse, ComposioAuthorizeResponse,
     ComposioAvailableTrigger, ComposioAvailableTriggersResponse, ComposioConnectionsResponse,
     ComposioCreateTriggerResponse, ComposioDeleteResponse, ComposioDisableTriggerResponse,
     ComposioEnableTriggerResponse, ComposioExecuteResponse, ComposioToolsResponse,
 };
+use std::sync::Arc;
 
 // ── Direct-mode factory ─────────────────────────────────────────────
 //

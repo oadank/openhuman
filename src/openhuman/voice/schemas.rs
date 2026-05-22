@@ -704,9 +704,7 @@ fn handle_voice_set_providers(params: Map<String, Value>) -> ControllerFuture {
 fn validate_stt_provider(provider: &str) -> Result<(), String> {
     match provider {
         "whisper" => Ok(()),
-        other => Err(format!(
-            "invalid stt_provider '{other}' (valid: 'whisper')"
-        )),
+        other => Err(format!("invalid stt_provider '{other}' (valid: 'whisper')")),
     }
 }
 

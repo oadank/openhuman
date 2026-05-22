@@ -577,40 +577,40 @@ async fn run_typed_mode(
                 .find(|ci| ci.connected && ci.toolkit.eq_ignore_ascii_case(tk))
             {
                 let fresh_actions = match &direct_client {
-                    Some(direct) => match crate::openhuman::composio::fetch_direct_toolkit_actions(
-                        direct, tk,
-                    )
-                    .await
-                    {
-                        Ok(actions) if !actions.is_empty() => {
-                            tracing::info!(
-                                agent_id = %definition.id,
-                                toolkit = %tk,
-                                action_count = actions.len(),
-                                cached_actions = cached_integration.tools.len(),
-                                "[composio-direct] subagent_runner:typed: refreshed direct catalogue"
-                            );
-                            actions
+                    Some(direct) => {
+                        match crate::openhuman::composio::fetch_direct_toolkit_actions(direct, tk)
+                            .await
+                        {
+                            Ok(actions) if !actions.is_empty() => {
+                                tracing::info!(
+                                    agent_id = %definition.id,
+                                    toolkit = %tk,
+                                    action_count = actions.len(),
+                                    cached_actions = cached_integration.tools.len(),
+                                    "[composio-direct] subagent_runner:typed: refreshed direct catalogue"
+                                );
+                                actions
+                            }
+                            Ok(_) => {
+                                tracing::info!(
+                                    agent_id = %definition.id,
+                                    toolkit = %tk,
+                                    cached_actions = cached_integration.tools.len(),
+                                    "[composio-direct] subagent_runner:typed: direct refresh returned empty; falling back to cached catalogue"
+                                );
+                                cached_integration.tools.clone()
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    agent_id = %definition.id,
+                                    toolkit = %tk,
+                                    error = %e,
+                                    "[composio-direct] subagent_runner:typed: direct refresh failed; falling back to cached catalogue"
+                                );
+                                cached_integration.tools.clone()
+                            }
                         }
-                        Ok(_) => {
-                            tracing::info!(
-                                agent_id = %definition.id,
-                                toolkit = %tk,
-                                cached_actions = cached_integration.tools.len(),
-                                "[composio-direct] subagent_runner:typed: direct refresh returned empty; falling back to cached catalogue"
-                            );
-                            cached_integration.tools.clone()
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                agent_id = %definition.id,
-                                toolkit = %tk,
-                                error = %e,
-                                "[composio-direct] subagent_runner:typed: direct refresh failed; falling back to cached catalogue"
-                            );
-                            cached_integration.tools.clone()
-                        }
-                    },
+                    }
                     None => {
                         tracing::debug!(
                             agent_id = %definition.id,

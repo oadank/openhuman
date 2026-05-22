@@ -943,7 +943,6 @@ pub async fn bootstrap_core_runtime(embedded_core: bool) {
             );
         }
     }
-
 }
 
 /// JSON-serializable wrapper for the entire RPC schema dump.

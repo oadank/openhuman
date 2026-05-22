@@ -76,11 +76,7 @@ const emptySnapshot: CoreAppSnapshot = {
   runtime: { screenIntelligence: null, localAi: null, autocomplete: null, service: null },
 };
 
-let currentState: CoreState = {
-  isBootstrapping: true,
-  isReady: false,
-  snapshot: emptySnapshot,
-};
+let currentState: CoreState = { isBootstrapping: true, isReady: false, snapshot: emptySnapshot };
 
 export function getCoreStateSnapshot(): CoreState {
   return currentState;

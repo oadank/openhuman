@@ -135,9 +135,6 @@ fn load_dotenv_for_cli_reads_cwd_dotenv_without_overwriting_existing_env() {
     }
 
     result.expect("dotenv load should succeed");
-    assert_eq!(
-        loaded_test_url.as_deref(),
-        Some("https://example.test")
-    );
+    assert_eq!(loaded_test_url.as_deref(), Some("https://example.test"));
     assert_eq!(loaded_app_env.as_deref(), Some("production"));
 }

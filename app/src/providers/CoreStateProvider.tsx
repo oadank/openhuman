@@ -270,12 +270,7 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
       if (requestId !== snapshotRequestIdRef.current) {
         return previous;
       }
-      return {
-        ...previous,
-        isBootstrapping: false,
-        isReady: true,
-        snapshot: nextSnapshot,
-      };
+      return { ...previous, isBootstrapping: false, isReady: true, snapshot: nextSnapshot };
     });
 
     // When the authenticated identity changes without a full restart-driven
@@ -502,10 +497,7 @@ export default function CoreStateProvider({ children }: { children: ReactNode })
   const clearSession = useCallback(async () => {
     logoutGuardUntilRef.current = Date.now() + 5_000;
     snapshotRequestIdRef.current += 1;
-    commitState(previous => ({
-      ...previous,
-      snapshot: toSignedOutSnapshot(previous.snapshot),
-    }));
+    commitState(previous => ({ ...previous, snapshot: toSignedOutSnapshot(previous.snapshot) }));
     memoryTokenRef.current = null;
     // Keep `OPENHUMAN_ACTIVE_USER_ID` pointing at the last user. The next
     // refresh's `getActiveUserId()` seed comparison decides whether the

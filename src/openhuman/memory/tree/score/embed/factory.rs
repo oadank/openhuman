@@ -101,7 +101,10 @@ mod tests {
         (tmp, cfg)
     }
 
-    fn expect_embedder_err(result: anyhow::Result<Box<dyn Embedder>>, context: &str) -> anyhow::Error {
+    fn expect_embedder_err(
+        result: anyhow::Result<Box<dyn Embedder>>,
+        context: &str,
+    ) -> anyhow::Error {
         match result {
             Ok(embedder) => panic!("{context}: expected error, got {}", embedder.name()),
             Err(err) => err,

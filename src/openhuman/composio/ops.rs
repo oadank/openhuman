@@ -141,9 +141,7 @@ pub async fn composio_list_toolkits(
     tracing::debug!("[composio] rpc list_toolkits");
     let _ = create_composio_client(config)
         .map_err(|e| format!("[composio-direct] list_toolkits: {e}"))?;
-    tracing::info!(
-        "[composio-direct] list_toolkits: no server-side allowlist is enforced"
-    );
+    tracing::info!("[composio-direct] list_toolkits: no server-side allowlist is enforced");
     Ok(RpcOutcome::new(
         ComposioToolkitsResponse::default(),
         vec!["composio: direct mode - toolkits are managed via app.composio.dev".to_string()],
@@ -330,9 +328,7 @@ pub async fn composio_list_tools(
     if scope.is_empty() {
         return Ok(RpcOutcome::new(
             ComposioToolsResponse::default(),
-            vec![
-                "composio: direct mode - 0 tool(s) listed (no connected toolkits)".to_string(),
-            ],
+            vec!["composio: direct mode - 0 tool(s) listed (no connected toolkits)".to_string()],
         ));
     }
     let mut resp = direct_list_tools(&direct, &scope)
@@ -1850,7 +1846,6 @@ pub async fn composio_clear_api_key(config: &Config) -> OpResult<RpcOutcome<serd
         vec!["composio: api key cleared; direct mode remains active".into()],
     ))
 }
-
 
 // ── Helpers re-exported so callers can pull connection/tool types without
 // reaching into the nested types module.

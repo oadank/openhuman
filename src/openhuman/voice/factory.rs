@@ -227,7 +227,10 @@ impl TtsProvider for CloudTtsProvider {
         voice: Option<&str>,
     ) -> Result<RpcOutcome<ReplySpeechResult>, String> {
         let _ = (config, text, voice);
-        Err("cloud TTS is unavailable in this build; use provider `kokoro`, `piper`, or `system`".to_string())
+        Err(
+            "cloud TTS is unavailable in this build; use provider `kokoro`, `piper`, or `system`"
+                .to_string(),
+        )
     }
 }
 

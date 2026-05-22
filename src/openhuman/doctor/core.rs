@@ -183,7 +183,10 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagnosticItem>) {
     } else {
         items.push(DiagnosticItem::ok(
             cat,
-            format!("cloud providers configured: {}", config.cloud_providers.len()),
+            format!(
+                "cloud providers configured: {}",
+                config.cloud_providers.len()
+            ),
         ));
     }
 

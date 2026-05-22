@@ -77,7 +77,8 @@ pub fn learning_schemas(function: &str) -> ControllerSchema {
         "learning_linkedin_enrichment" => ControllerSchema {
             namespace: "learning",
             function: "linkedin_enrichment",
-            description: "Search Gmail for LinkedIn profile URLs and persist a local profile note. \
+            description:
+                "Search Gmail for LinkedIn profile URLs and persist a local profile note. \
                           Runs the LinkedIn enrichment pipeline.",
             inputs: vec![FieldSchema {
                 name: "profile_url",

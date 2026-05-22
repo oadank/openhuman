@@ -612,9 +612,7 @@ describe('ChatRuntimeProvider — dedupe, proactive resolution, mid-turn invaria
       );
       expect(threadApi.appendMessage).not.toHaveBeenCalledWith(
         't-err-sanitized',
-        expect.objectContaining({
-          content: expect.stringContaining('https://api.example.test'),
-        })
+        expect.objectContaining({ content: expect.stringContaining('https://api.example.test') })
       );
     });
 

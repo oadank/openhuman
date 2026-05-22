@@ -65,7 +65,10 @@ pub async fn synthesize_reply(
     if trimmed.is_empty() {
         return Err("text is required".to_string());
     }
-    Err("cloud TTS is unavailable in this build; use provider `kokoro`, `piper`, or `system`".to_string())
+    Err(
+        "cloud TTS is unavailable in this build; use provider `kokoro`, `piper`, or `system`"
+            .to_string(),
+    )
 }
 
 /// Translate the backend's tolerant response shape into the UI contract.
