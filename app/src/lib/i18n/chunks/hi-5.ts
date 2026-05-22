@@ -66,7 +66,7 @@ const hi5: TranslationMap = {
     'Ollama यूज़ेबल होने से पहले इन्स्टॉलर बंद हो गया। दोबारा कोशिश करें या ollama.com से मैन्युअली इन्स्टॉल करें।',
   'settings.localModel.deviceCapability.installFirst': 'पहले Ollama चलाएँ।',
   'settings.localModel.deviceCapability.installFirstDesc':
-    'स्थानीय टियर बाहरी रूप से प्रबंधित Ollama एंडपॉइंट पर निर्भर हैं। इसे स्वयं प्रारंभ करें, अपने इच्छित मॉडल खींचें, और जब तक रनटाइम पहुँच योग्य न हो तब तक "Disabled (cloud fallback)" का उपयोग करते रहें।',
+    'स्थानीय टियर बाहरी रूप से प्रबंधित Ollama एंडपॉइंट पर निर्भर हैं। इसे स्वयं प्रारंभ करें, अपने इच्छित मॉडल खींचें, और जब तक रनटाइम पहुँच योग्य न हो तब तक "Disabled (external fallback)" का उपयोग करते रहें।',
   'settings.localModel.deviceCapability.installOllamaFirst':
     'इस टियर का उपयोग करने के लिए पहले Ollama चलाएँ',
   'settings.localModel.deviceCapability.installingOllama': 'Ollama इन्स्टॉल हो रहा है',
@@ -383,6 +383,7 @@ const hi5: TranslationMap = {
   'composio.reconnect': 'पुनः कनेक्ट करें',
   'composio.directModeRequiresKey':
     'सहेजने में विफल। डायरेक्ट मोड के लिए गैर-रिक्त API कुंजी आवश्यक है।',
+  'composio.triggersTitle': 'Composio ट्रिगर',
   'composio.notYetRouted': 'अभी तक रूट नहीं हुआ',
   'composio.triggers.loading': 'लोड हो रहा है…',
   'conversations.taskKanban.todo': 'करना है',

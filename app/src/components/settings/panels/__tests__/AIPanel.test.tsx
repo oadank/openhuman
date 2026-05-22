@@ -7,6 +7,7 @@ import {
   loadLocalProviderSnapshot,
   saveAISettings,
   setCloudProviderKey,
+  testCloudProvider,
 } from '../../../../services/api/aiSettingsApi';
 import { renderWithProviders } from '../../../../test/test-utils';
 import {
@@ -35,11 +36,13 @@ vi.mock('../../../../services/api/aiSettingsApi', () => ({
   clearCloudProviderKey: vi.fn(),
   serializeProviderRef: vi.fn((r: { kind: string; providerSlug?: string; model?: string }) =>
     r.kind === 'openhuman'
-      ? 'openhuman'
+      ? ''
       : r.kind === 'local'
         ? `ollama:${r.model}`
         : `${r.providerSlug}:${r.model}`
   ),
+  listProviderModels: vi.fn().mockResolvedValue([]),
+  testCloudProvider: vi.fn(),
   localProvider: { download: vi.fn(), applyPreset: vi.fn() },
   flushCloudProviders: vi.fn().mockResolvedValue(undefined),
 }));
@@ -62,6 +65,7 @@ vi.mock('../../../../lib/composio/composioApi', () => ({ listConnections: vi.fn(
 
 const baseSettings = {
   cloudProviders: [],
+  chatDefault: { kind: 'openhuman' as const },
   routing: {
     chat: { kind: 'openhuman' as const },
     reasoning: { kind: 'openhuman' as const },
@@ -102,6 +106,14 @@ describe('AIPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(loadAISettings).mockResolvedValue(baseSettings);
+    vi.mocked(testCloudProvider).mockResolvedValue({
+      ok: true,
+      provider_id: 'p_openai_1',
+      provider_slug: 'openai',
+      model: 'gpt-5.4',
+      latency_ms: 100,
+      response_preview: 'openhuman-provider-ok',
+    });
     vi.mocked(loadLocalProviderSnapshot).mockResolvedValue(baseLocalSnapshot);
     vi.mocked(openhumanHeartbeatSettingsGet).mockResolvedValue({
       result: { settings: baseHeartbeatSettings },
@@ -137,12 +149,10 @@ describe('AIPanel', () => {
     expect(screen.getAllByText(/^Routing$/).length).toBeGreaterThan(0);
   });
 
-  it('renders the OpenHuman primary card after load', async () => {
+  it('renders the chat default control after load', async () => {
     renderWithProviders(<AIPanel />);
-    // The OpenHuman label now appears in multiple places (provider card,
-    // each workload routing row's "↳ OpenHuman" resolution hint), so we
-    // assert at-least-one match rather than getByText.
-    await waitFor(() => expect(screen.getAllByText(/OpenHuman/i).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByText(/Default:/i)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Set default/i })).toBeInTheDocument();
   });
 
   it('renders all nine workload labels', async () => {
@@ -177,6 +187,11 @@ describe('AIPanel', () => {
           has_api_key: true,
         },
       ],
+      chatDefault: {
+        kind: 'cloud' as const,
+        providerSlug: 'anthropic',
+        model: 'claude-3-5-sonnet-20241022',
+      },
       routing: {
         chat: { kind: 'openhuman' as const },
         reasoning: {
@@ -260,8 +275,8 @@ describe('AIPanel', () => {
     const connectSwitch = screen.getByRole('switch', { name: /Connect Custom/i });
     fireEvent.click(connectSwitch);
 
-    // The full CloudProviderEditor should appear (has "Add cloud provider" heading).
-    await waitFor(() => expect(screen.getByText(/Add cloud provider/i)).toBeInTheDocument());
+    // The full CloudProviderEditor should appear (has "Add external provider" heading).
+    await waitFor(() => expect(screen.getByText(/Add external provider/i)).toBeInTheDocument());
     // The simple ProviderKeyDialog should NOT appear.
     expect(screen.queryByRole('dialog', { name: /Connect Custom/i })).not.toBeInTheDocument();
   });
@@ -280,6 +295,7 @@ describe('AIPanel', () => {
           has_api_key: true,
         },
       ],
+      chatDefault: { kind: 'cloud' as const, providerSlug: 'openai', model: 'gpt-5.4' },
       routing: {
         chat: { kind: 'openhuman' as const },
         reasoning: { kind: 'cloud' as const, providerSlug: 'openai', model: 'gpt-4o' },
@@ -324,6 +340,36 @@ describe('AIPanel', () => {
     expect(nextSettings.routing.agentic).toEqual({ kind: 'openhuman' });
     // Entries that were already openhuman remain unchanged.
     expect(nextSettings.routing.coding).toEqual({ kind: 'openhuman' });
+  });
+
+  it('tests an enabled external provider with the chat default model', async () => {
+    const settingsWithOpenAI = {
+      cloudProviders: [
+        {
+          id: 'p_openai_1',
+          slug: 'openai',
+          label: 'OpenAI',
+          endpoint: 'https://api.openai.com/v1',
+          auth_style: 'bearer' as const,
+          has_api_key: true,
+        },
+      ],
+      chatDefault: { kind: 'cloud' as const, providerSlug: 'openai', model: 'gpt-5.4' },
+      routing: { ...baseSettings.routing },
+    };
+    vi.mocked(loadAISettings).mockResolvedValue(settingsWithOpenAI);
+
+    renderWithProviders(<AIPanel />);
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^Test$/i })).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Test$/i }));
+
+    await waitFor(() =>
+      expect(vi.mocked(testCloudProvider)).toHaveBeenCalledWith('openai', 'gpt-5.4')
+    );
+    await waitFor(() => expect(screen.getByText(/OK gpt-5.4/)).toBeInTheDocument());
   });
 
   // ─── API-key dialog: failed setCloudProviderKey does not add provider ────────

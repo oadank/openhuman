@@ -63,7 +63,7 @@ const en1: TranslationMap = {
   'settings.aiModels': 'AI & Models',
   'settings.aiModelsDesc': 'Local AI model setup, downloads, and LLM provider',
   'settings.ai': 'AI Configuration',
-  'settings.aiDesc': 'Cloud providers, local Ollama models, and per-workload routing',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'Restart Tour',
   'settings.restartTourDesc': 'Replay the product walkthrough from the beginning',
   'settings.about': 'About',

@@ -65,12 +65,12 @@ const en5: TranslationMap = {
     'The installer exited before Ollama was usable. Click retry to try again, or install manually from ollama.com.',
   'settings.localModel.deviceCapability.installFirst': 'Run Ollama first.',
   'settings.localModel.deviceCapability.installFirstDesc':
-    'Local tiers depend on an externally managed Ollama endpoint. Start it yourself, pull the models you want, and keep using "Disabled (cloud fallback)" until the runtime is reachable.',
+    'Local tiers depend on an externally managed Ollama endpoint. Start it yourself, pull the models you want, and keep using "Disabled (external fallback)" until the runtime is reachable.',
   'settings.localModel.deviceCapability.installOllamaFirst': 'Run Ollama first to use this tier',
   'settings.localModel.deviceCapability.installingOllama': 'Installing ollama',
   'settings.localModel.deviceCapability.loadingDeviceInfo': 'Loading device info',
   'settings.localModel.deviceCapability.localAiDisabled':
-    'Local AI disabled — using cloud fallback.',
+    'Local AI disabled — using external provider fallback.',
   'settings.localModel.deviceCapability.modelTier': 'Model Tier',
   'settings.localModel.deviceCapability.needsOllama': 'Needs ollama',
   'settings.localModel.deviceCapability.notDetected': 'Not detected',
@@ -381,6 +381,7 @@ const en5: TranslationMap = {
   'composio.authExpired': 'Auth expired',
   'composio.reconnect': 'Reconnect',
   'composio.directModeRequiresKey': 'Failed to save. Direct mode requires a non-empty API key.',
+  'composio.triggersTitle': 'Composio Triggers',
   'composio.notYetRouted': 'not yet routed',
   'composio.triggers.loading': 'Loading…',
   'conversations.taskKanban.todo': 'To do',

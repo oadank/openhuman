@@ -376,6 +376,7 @@ const ar5: TranslationMap = {
   'composio.authExpired': 'انتهت صلاحية المصادقة',
   'composio.reconnect': 'إعادة الاتصال',
   'composio.directModeRequiresKey': 'فشل الحفظ. الوضع المباشر يتطلب مفتاح API غير فارغ.',
+  'composio.triggersTitle': 'مشغّلات Composio',
   'composio.notYetRouted': 'لم يتم توجيهه بعد',
   'composio.triggers.loading': 'جارٍ التحميل…',
   'conversations.taskKanban.todo': 'للتنفيذ',

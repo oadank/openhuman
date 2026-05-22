@@ -66,7 +66,7 @@ const id5: TranslationMap = {
     'Penginstal keluar sebelum Ollama dapat digunakan. Klik coba ulang, atau instal manual dari ollama.com.',
   'settings.localModel.deviceCapability.installFirst': 'Jalankan Ollama terlebih dahulu.',
   'settings.localModel.deviceCapability.installFirstDesc':
-    'Tier lokal bergantung pada endpoint Ollama yang dikelola eksternal. Jalankan sendiri, tarik model yang Anda inginkan, dan tetap gunakan "Disabled (cloud fallback)" hingga runtime dapat dijangkau.',
+    'Tier lokal bergantung pada endpoint Ollama yang dikelola eksternal. Jalankan sendiri, tarik model yang Anda inginkan, dan tetap gunakan "Disabled (external fallback)" hingga runtime dapat dijangkau.',
   'settings.localModel.deviceCapability.installOllamaFirst':
     'Jalankan Ollama terlebih dahulu untuk menggunakan tier ini',
   'settings.localModel.deviceCapability.installingOllama': 'Menginstal Ollama',
@@ -383,6 +383,7 @@ const id5: TranslationMap = {
   'composio.reconnect': 'Hubungkan ulang',
   'composio.directModeRequiresKey':
     'Gagal menyimpan. Mode Direct memerlukan API key yang tidak kosong.',
+  'composio.triggersTitle': 'Pemicu Composio',
   'composio.notYetRouted': 'belum dirutekan',
   'composio.triggers.loading': 'Memuat…',
   'conversations.taskKanban.todo': 'Akan dikerjakan',

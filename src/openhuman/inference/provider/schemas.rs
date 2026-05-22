@@ -1,7 +1,7 @@
 //! RPC controller schemas for the providers domain.
 //!
 //! Exposes `openhuman.providers_list_models` — fetches the `/models` endpoint
-//! of a configured cloud provider and returns the list.
+//! of a configured external provider and returns the list.
 
 use crate::core::all::{ControllerFuture, RegisteredController};
 use crate::core::{ControllerSchema, FieldSchema, TypeSchema};
@@ -37,23 +37,19 @@ fn list_models_schema() -> ControllerSchema {
     ControllerSchema {
         namespace: "providers",
         function: "list_models",
-        description: "Fetch the available model list from a configured cloud provider's /models API.",
-        inputs: vec![
-            FieldSchema {
-                name: "provider_id",
-                ty: TypeSchema::String,
-                comment: "Opaque id of the cloud_providers entry to query.",
-                required: true,
-            },
-        ],
-        outputs: vec![
-            FieldSchema {
-                name: "models",
-                ty: TypeSchema::Json,
-                comment: "Array of { id, owned_by?, context_window? } model descriptors returned by the provider.",
-                required: true,
-            },
-        ],
+        description: "Fetch the available model list from a configured external provider's /models API.",
+        inputs: vec![FieldSchema {
+            name: "provider_id",
+            ty: TypeSchema::String,
+            comment: "Opaque id of the cloud_providers entry to query.",
+            required: true,
+        }],
+        outputs: vec![FieldSchema {
+            name: "models",
+            ty: TypeSchema::Json,
+            comment: "Array of { id, owned_by?, context_window? } model descriptors returned by the provider.",
+            required: true,
+        }],
     }
 }
 

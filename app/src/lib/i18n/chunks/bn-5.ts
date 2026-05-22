@@ -65,7 +65,7 @@ const bn5: TranslationMap = {
     'Ollama ব্যবহারযোগ্য হওয়ার আগে ইনস্টলার বন্ধ হয়েছে। আবার চেষ্টা করতে ক্লিক করুন, বা ollama.com থেকে ম্যানুয়ালি ইনস্টল করুন।',
   'settings.localModel.deviceCapability.installFirst': 'প্রথমে Ollama চালান।',
   'settings.localModel.deviceCapability.installFirstDesc':
-    'লোকাল টিয়ার একটি বাহ্যিকভাবে পরিচালিত Ollama endpoint-এর উপর নির্ভর করে। নিজে এটি শুরু করুন, আপনি যে মডেলগুলি চান তা টানুন, এবং রানটাইম পৌঁছানো না যাওয়া পর্যন্ত "Disabled (cloud fallback)" ব্যবহার করতে থাকুন।',
+    'লোকাল টিয়ার একটি বাহ্যিকভাবে পরিচালিত Ollama endpoint-এর উপর নির্ভর করে। নিজে এটি শুরু করুন, আপনি যে মডেলগুলি চান তা টানুন, এবং রানটাইম পৌঁছানো না যাওয়া পর্যন্ত "Disabled (external fallback)" ব্যবহার করতে থাকুন।',
   'settings.localModel.deviceCapability.installOllamaFirst':
     'এই টিয়ার ব্যবহার করতে প্রথমে Ollama চালান',
   'settings.localModel.deviceCapability.installingOllama': 'Ollama ইনস্টল হচ্ছে',
@@ -380,6 +380,7 @@ const bn5: TranslationMap = {
   'composio.authExpired': 'অথ মেয়াদোত্তীর্ণ',
   'composio.reconnect': 'পুনঃসংযোগ',
   'composio.directModeRequiresKey': 'সংরক্ষণ ব্যর্থ। Direct মোডের জন্য একটি API key প্রয়োজন।',
+  'composio.triggersTitle': 'Composio ট্রিগার',
   'composio.notYetRouted': 'এখনও রুট করা হয়নি',
   'composio.triggers.loading': 'লোড হচ্ছে…',
   'conversations.taskKanban.todo': 'করণীয়',

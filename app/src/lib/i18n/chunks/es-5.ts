@@ -384,6 +384,7 @@ const es5: TranslationMap = {
   'composio.reconnect': 'Reconectar',
   'composio.directModeRequiresKey':
     'Error al guardar. El modo Directo requiere una clave API no vacía.',
+  'composio.triggersTitle': 'Disparadores de Composio',
   'composio.notYetRouted': 'aún sin enrutar',
   'composio.triggers.loading': 'Cargando…',
   'conversations.taskKanban.todo': 'Pendiente',

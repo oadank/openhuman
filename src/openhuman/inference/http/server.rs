@@ -16,8 +16,8 @@
 //!
 //! The `model` field in the request selects the provider:
 //! - `"ollama:<model>"` or a bare model name → local Ollama
-//! - `"<slug>:<model>"` → cloud provider entry by slug
-//! - everything else → OpenHuman backend (session JWT)
+//! - `"<slug>:<model>"` → external provider entry by slug
+//! - legacy bare names route through the configured default provider
 
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -51,7 +51,7 @@ pub fn router() -> Router<AppState> {
 /// `POST /v1/chat/completions`
 ///
 /// Accepts an OpenAI-compatible request body. Routes through the unified
-/// `Provider` trait — local (Ollama) for `ollama:*` model names, cloud otherwise.
+/// `Provider` trait — local (Ollama) for `ollama:*` model names, external provider otherwise.
 async fn chat_completions_handler(
     State(_state): State<AppState>,
     Json(req): Json<ChatCompletionRequest>,
@@ -241,7 +241,7 @@ async fn chat_completions_handler(
 
 /// `GET /v1/models`
 ///
-/// Lists all configured models (local Ollama + cloud providers).
+/// Lists all configured models (local Ollama + external providers).
 async fn models_handler(State(_state): State<AppState>) -> Response {
     debug!("{LOG_PREFIX} models: start");
 

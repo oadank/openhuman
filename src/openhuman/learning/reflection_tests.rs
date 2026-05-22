@@ -429,7 +429,7 @@ async fn on_turn_complete_rolls_back_counter_when_reflection_call_fails() {
     let turn = reflective_turn();
 
     let err = hook.on_turn_complete(&turn).await.unwrap_err();
-    assert!(err.to_string().contains("no cloud provider configured"));
+    assert!(err.to_string().contains("no external provider configured"));
     assert_eq!(
         hook.session_counts
             .lock()

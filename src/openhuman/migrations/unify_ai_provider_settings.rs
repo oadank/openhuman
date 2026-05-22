@@ -6,11 +6,11 @@
 //! Pre-unification config carried five different vocabularies for the same
 //! question — *"where does this LLM workload run?"*:
 //!
-//! - `inference_url` + `model_routes`        — global cloud preset
+//! - `inference_url` + `model_routes`        — global external-provider preset
 //! - `reasoning_provider` / `agentic_provider` / `coding_provider`
 //!                                          — per-role chat (#1710, partial)
 //! - `local_ai.usage.{embeddings,heartbeat,learning_reflection,subconscious}`
-//!                                          — local-vs-cloud booleans
+//!                                          — legacy local-vs-remote booleans
 //! - `memory_tree.llm_backend` (+ `cloud_llm_model`) — memory summariser
 //!
 //! After this migration there is one grammar — provider strings parsed by
@@ -169,55 +169,61 @@ fn derive_workload_providers(config: &mut Config, stats: &mut MigrationStats) {
         }
     };
 
-    // Memory summariser — `memory_tree.llm_backend` is `LlmBackend::Cloud | Local`.
-    let memory_value = match config.memory_tree.llm_backend {
+    // Memory summariser — preserve explicit local routing. Remote/external
+    // routing is represented by leaving the field unset; the factory then
+    // resolves the user's configured external provider. Do not write the old
+    // "cloud" sentinel because the hosted OpenHuman backend is gone.
+    if matches!(
+        config.memory_tree.llm_backend,
         crate::openhuman::config::schema::LlmBackend::Local
-            if runtime_on && !chat_model.is_empty() =>
-        {
-            format!("ollama:{}", chat_model)
-        }
-        _ => "cloud".to_string(),
-    };
-    set_field(&mut config.memory_provider, memory_value, stats);
+    ) && runtime_on
+        && !chat_model.is_empty()
+    {
+        set_field(
+            &mut config.memory_provider,
+            format!("ollama:{}", chat_model),
+            stats,
+        );
+    }
 
     // Embeddings — uses the embedding_model_id, not chat_model_id.
-    let embeddings_value =
-        if config.local_ai.usage.embeddings && runtime_on && !embed_model.is_empty() {
-            format!("ollama:{}", embed_model)
-        } else {
-            "cloud".to_string()
-        };
-    set_field(&mut config.embeddings_provider, embeddings_value, stats);
+    if config.local_ai.usage.embeddings && runtime_on && !embed_model.is_empty() {
+        set_field(
+            &mut config.embeddings_provider,
+            format!("ollama:{}", embed_model),
+            stats,
+        );
+    }
 
-    // The remaining three use the chat model when local.
-    let heartbeat_value = if config.local_ai.usage.heartbeat && runtime_on && !chat_model.is_empty()
-    {
-        format!("ollama:{}", chat_model)
-    } else {
-        "cloud".to_string()
-    };
-    set_field(&mut config.heartbeat_provider, heartbeat_value, stats);
+    // The remaining three use the chat model when local; otherwise they remain
+    // unset and resolve to the configured external provider at runtime.
+    if config.local_ai.usage.heartbeat && runtime_on && !chat_model.is_empty() {
+        set_field(
+            &mut config.heartbeat_provider,
+            format!("ollama:{}", chat_model),
+            stats,
+        );
+    }
 
-    let learning_value =
-        if config.local_ai.usage.learning_reflection && runtime_on && !chat_model.is_empty() {
-            format!("ollama:{}", chat_model)
-        } else {
-            "cloud".to_string()
-        };
-    set_field(&mut config.learning_provider, learning_value, stats);
+    if config.local_ai.usage.learning_reflection && runtime_on && !chat_model.is_empty() {
+        set_field(
+            &mut config.learning_provider,
+            format!("ollama:{}", chat_model),
+            stats,
+        );
+    }
 
-    let subconscious_value =
-        if config.local_ai.usage.subconscious && runtime_on && !chat_model.is_empty() {
-            format!("ollama:{}", chat_model)
-        } else {
-            "cloud".to_string()
-        };
-    set_field(&mut config.subconscious_provider, subconscious_value, stats);
+    if config.local_ai.usage.subconscious && runtime_on && !chat_model.is_empty() {
+        set_field(
+            &mut config.subconscious_provider,
+            format!("ollama:{}", chat_model),
+            stats,
+        );
+    }
 
-    // The three chat workloads (reasoning/agentic/coding) intentionally
-    // stay None — the factory treats unset as "cloud" which routes to
-    // primary_cloud. No equivalent of "force this to local" existed in the
-    // legacy config for chat, so there's nothing to derive.
+    // The chat workloads intentionally stay None; Settings → AI stores their
+    // shared default in `default_model`, and the factory resolves unset chat
+    // roles through that external-provider route.
 }
 
 /// Heuristic: does the URL look like the removed hosted provider endpoint?

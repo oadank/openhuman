@@ -63,7 +63,7 @@ const zhCN1: TranslationMap = {
   'settings.aiModels': 'AI 与模型',
   'settings.aiModelsDesc': '本地 AI 模型设置、下载与 LLM 提供商',
   'settings.ai': 'AI',
-  'settings.aiDesc': '云端提供商、本地 Ollama 模型以及按工作负载路由',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': '重新开始导览',
   'settings.restartTourDesc': '从头开始回放产品导览',
   'settings.about': '关于',

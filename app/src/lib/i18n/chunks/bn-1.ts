@@ -63,7 +63,7 @@ const bn1: TranslationMap = {
   'settings.aiModels': 'AI ও মডেল',
   'settings.aiModelsDesc': 'লোকাল AI মডেল সেটআপ, ডাউনলোড এবং LLM প্রোভাইডার',
   'settings.ai': 'AI কনফিগারেশন',
-  'settings.aiDesc': 'ক্লাউড প্রোভাইডার, লোকাল Ollama মডেল এবং ওয়ার্কলোড রুটিং',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'ট্যুর পুনরায় শুরু',
   'settings.restartTourDesc': 'শুরু থেকে প্রোডাক্ট ওয়াকথ্রু আবার দেখুন',
   'settings.about': 'সম্পর্কে',

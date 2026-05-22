@@ -21,6 +21,7 @@ export const CORE_RPC_METHODS = {
   inferenceGetClientConfig: 'openhuman.inference_get_client_config',
   inferenceListModels: 'openhuman.inference_list_models',
   inferencePresets: 'openhuman.inference_presets',
+  inferenceTestProvider: 'openhuman.inference_test_provider',
   inferenceUpdateLocalSettings: 'openhuman.inference_update_local_settings',
   inferenceUpdateModelSettings: 'openhuman.inference_update_model_settings',
   providersListModels: 'openhuman.inference_list_models',

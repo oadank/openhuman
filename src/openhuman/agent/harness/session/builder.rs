@@ -943,30 +943,29 @@ impl Agent {
                 // branch instead of paying for the clone whenever
                 // `learning.enabled` is true.
                 let full_config = Arc::new(config.clone());
-                // For cloud reflection, wrap the provider in an Arc.
-                // For local, no provider needed.
-                let reflection_provider: Option<
-                    Arc<dyn crate::openhuman::inference::provider::Provider>,
-                > = if config.learning.reflection_source
+                // For external reflection, resolve through the same workload
+                // factory as normal user-facing inference. For local, no
+                // external provider is needed.
+                let (reflection_provider, reflection_model): (
+                    Option<Arc<dyn crate::openhuman::inference::provider::Provider>>,
+                    Option<String>,
+                ) = if config.learning.reflection_source
                     == crate::openhuman::config::ReflectionSource::Cloud
                 {
-                    Some(Arc::from(provider::create_routed_provider(
-                        config.inference_url.as_deref(),
-                        None,
-                        config.api_key.as_deref(),
-                        &config.reliability,
-                        &config.model_routes,
-                        &model_name,
-                    )?))
+                    let (provider, model) = provider::create_chat_provider("learning", &config)?;
+                    (Some(Arc::from(provider)), Some(model))
                 } else {
-                    None
+                    (None, None)
                 };
-                post_turn_hooks.push(Arc::new(crate::openhuman::learning::ReflectionHook::new(
-                    config.learning.clone(),
-                    full_config.clone(),
-                    memory.clone(),
-                    reflection_provider,
-                )));
+                post_turn_hooks.push(Arc::new(
+                    crate::openhuman::learning::ReflectionHook::new_with_model(
+                        config.learning.clone(),
+                        full_config.clone(),
+                        memory.clone(),
+                        reflection_provider,
+                        reflection_model,
+                    ),
+                ));
                 log::info!(
                     "[learning] reflection hook registered (source={:?})",
                     config.learning.reflection_source

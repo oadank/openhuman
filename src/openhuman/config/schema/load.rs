@@ -613,14 +613,22 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => return,
         };
-        // Already in new grammar (contains ':') or is the openhuman sentinel.
-        if raw.contains(':') || raw == "openhuman" {
+        // Already in new grammar.
+        if raw.contains(':') {
             return;
         }
         match raw.as_str() {
+            "openhuman" => {
+                tracing::info!(
+                    "[config][migrate] clearing legacy routing 'openhuman' \
+                     (hosted OpenHuman backend removed)"
+                );
+                *field = None;
+            }
             "cloud" => {
                 // "cloud" sentinel: look for the primary or first non-openhuman entry.
-                // If none found, leave as "openhuman".
+                // If none found, clear the field so the factory emits the
+                // normal Settings → AI configuration error.
                 let primary_slug = config.primary_cloud.as_deref().and_then(|pid| {
                     config
                         .cloud_providers
@@ -642,9 +650,9 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
                     *field = Some(format!("{s}:"));
                 } else {
                     tracing::debug!(
-                        "[config][migrate] routing 'cloud' with no non-openhuman provider → 'openhuman'"
+                        "[config][migrate] clearing routing 'cloud' with no non-openhuman provider"
                     );
-                    *field = Some("openhuman".to_string());
+                    *field = None;
                 }
             }
             other => {
@@ -659,15 +667,16 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
                 } else if other != "openhuman" {
                     tracing::warn!(
                         "[config][migrate] bare routing '{}' has no matching provider entry, \
-                         falling back to 'openhuman'",
+                         clearing legacy value",
                         other
                     );
-                    *field = Some("openhuman".to_string());
+                    *field = None;
                 }
             }
         }
     };
 
+    rewrite(&mut config.chat_provider);
     rewrite(&mut config.reasoning_provider);
     rewrite(&mut config.agentic_provider);
     rewrite(&mut config.coding_provider);

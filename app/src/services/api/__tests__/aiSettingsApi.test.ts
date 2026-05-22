@@ -22,6 +22,7 @@ import {
   serializeProviderRef,
   setCloudProviderKey,
   setLocalRuntimeEnabled,
+  testCloudProvider,
 } from '../aiSettingsApi';
 
 // ─── Mock declarations (must be hoisted before imports) ───────────────────────
@@ -149,7 +150,7 @@ describe('parseProviderString', () => {
 describe('serializeProviderRef', () => {
   it('serializes openhuman refs', () => {
     const ref: ProviderRef = { kind: 'openhuman' };
-    expect(serializeProviderRef(ref)).toBe('openhuman');
+    expect(serializeProviderRef(ref)).toBe('');
   });
 
   it('serializes cloud refs to slug:model', () => {
@@ -292,6 +293,32 @@ describe('loadAISettings', () => {
     expect(settings.routing.memory).toEqual({ kind: 'openhuman' });
   });
 
+  it('parses slug-prefixed default_model as the chat default', async () => {
+    mockOpenhumanGetClientConfig.mockResolvedValue(
+      makeClientConfigResult({
+        default_model: 'openai:gpt-5.4',
+        cloud_providers: [
+          {
+            id: 'p_openai_default',
+            slug: 'openai',
+            label: 'OpenAI',
+            endpoint: 'https://api.openai.com/v1',
+            auth_style: 'bearer',
+          },
+        ],
+      })
+    );
+    mockAuthListProviderCredentials.mockResolvedValue(makeAuthProfileResult([]));
+
+    const settings = await loadAISettings();
+
+    expect(settings.chatDefault).toEqual({
+      kind: 'cloud',
+      providerSlug: 'openai',
+      model: 'gpt-5.4',
+    });
+  });
+
   it('degrades gracefully when authListProviderCredentials throws', async () => {
     mockOpenhumanGetClientConfig.mockResolvedValue(
       makeClientConfigResult({
@@ -314,7 +341,7 @@ describe('loadAISettings', () => {
     expect(settings.cloudProviders[0].has_api_key).toBe(false);
   });
 
-  it('includes two cloud providers with correct labels and endpoints', async () => {
+  it('includes two external providers with correct labels and endpoints', async () => {
     mockOpenhumanGetClientConfig.mockResolvedValue(
       makeClientConfigResult({
         cloud_providers: [
@@ -456,6 +483,7 @@ describe('saveAISettings', () => {
           has_api_key: true,
         },
       ],
+      chatDefault: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o' },
       routing: {
         chat: { kind: 'openhuman' },
         reasoning: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o' },
@@ -485,7 +513,7 @@ describe('saveAISettings', () => {
 
     expect(mockOpenhumanUpdateModelSettings).toHaveBeenCalledOnce();
     const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
-    expect(patch.reasoning_provider).toBe('openhuman');
+    expect(patch.reasoning_provider).toBe('');
     // Other workloads unchanged — should not appear in patch.
     expect(patch.agentic_provider).toBeUndefined();
     expect(patch.cloud_providers).toBeUndefined();
@@ -516,6 +544,7 @@ describe('saveAISettings', () => {
     };
     const prev: AISettings = {
       cloudProviders: [],
+      chatDefault: { kind: 'openhuman' },
       routing: {
         chat: { kind: 'openhuman' },
         reasoning: { kind: 'openhuman' },
@@ -528,12 +557,40 @@ describe('saveAISettings', () => {
         subconscious: { kind: 'openhuman' },
       },
     };
-    const next: AISettings = { cloudProviders: [anthropicProvider], routing: { ...prev.routing } };
+    const next: AISettings = {
+      cloudProviders: [anthropicProvider],
+      chatDefault: prev.chatDefault,
+      routing: { ...prev.routing },
+    };
 
     await saveAISettings(prev, next);
 
     const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
     expect(patch.cloud_providers![0].auth_style).toBe('anthropic');
+  });
+
+  it('sends default_model when the chat default changes', async () => {
+    const prev = makeSettings();
+    const next = makeSettings({
+      chatDefault: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-5.4' },
+    });
+
+    await saveAISettings(prev, next);
+
+    const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
+    expect(patch.default_model).toBe('openai:gpt-5.4');
+  });
+
+  it('sends an empty default_model string when clearing the chat default', async () => {
+    const prev = makeSettings({
+      chatDefault: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-5.4' },
+    });
+    const next = makeSettings({ chatDefault: { kind: 'openhuman' } });
+
+    await saveAISettings(prev, next);
+
+    const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
+    expect(patch.default_model).toBe('');
   });
 
   it('sends both providers and routing when both change', async () => {
@@ -657,6 +714,46 @@ describe('listProviderModels', () => {
     const models = await listProviderModels('openai');
 
     expect(models).toEqual([]);
+  });
+});
+
+// ─── testCloudProvider ────────────────────────────────────────────────────────
+
+describe('testCloudProvider', () => {
+  beforeEach(() => {
+    mockCallCoreRpc.mockReset();
+    mockIsTauri.mockReturnValue(true);
+  });
+
+  it('dispatches openhuman.inference_test_provider with provider slug and model', async () => {
+    mockCallCoreRpc.mockResolvedValue({
+      result: {
+        ok: true,
+        provider_id: 'p_openai_1',
+        provider_slug: 'openai',
+        model: 'gpt-5.4',
+        latency_ms: 123,
+        response_preview: 'openhuman-provider-ok',
+      },
+    });
+
+    const result = await testCloudProvider('openai', 'gpt-5.4');
+
+    expect(mockCallCoreRpc).toHaveBeenCalledWith({
+      method: 'openhuman.inference_test_provider',
+      params: { provider_id: 'openai', model: 'gpt-5.4' },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('gpt-5.4');
+  });
+
+  it('throws when not running in Tauri', async () => {
+    mockIsTauri.mockReturnValue(false);
+
+    await expect(testCloudProvider('openai', 'gpt-5.4')).rejects.toThrow(
+      'Provider tests require the desktop app runtime'
+    );
+    expect(mockCallCoreRpc).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,7 @@
-use crate::openhuman::config::DelegateAgentConfig;
+use crate::openhuman::config::{Config, DelegateAgentConfig};
 use crate::openhuman::inference::provider::{
-    create_backend_inference_provider, Provider, ProviderRuntimeOptions, INFERENCE_BACKEND_ID,
+    create_backend_inference_provider, create_chat_provider, Provider, ProviderRuntimeOptions,
+    INFERENCE_BACKEND_ID,
 };
 use crate::openhuman::security::policy::ToolOperation;
 use crate::openhuman::security::SecurityPolicy;
@@ -21,6 +22,9 @@ pub struct DelegateTool {
     security: Arc<SecurityPolicy>,
     /// Provider runtime options inherited from root config.
     provider_runtime_options: ProviderRuntimeOptions,
+    /// Root config snapshot used to resolve delegate models through the
+    /// workload provider factory in the local-first fork.
+    root_config: Option<Arc<Config>>,
     /// Depth at which this tool instance lives in the delegation chain.
     depth: u32,
 }
@@ -38,10 +42,20 @@ impl DelegateTool {
         security: Arc<SecurityPolicy>,
         provider_runtime_options: ProviderRuntimeOptions,
     ) -> Self {
+        Self::new_with_options_and_config(agents, security, provider_runtime_options, None)
+    }
+
+    pub fn new_with_options_and_config(
+        agents: HashMap<String, DelegateAgentConfig>,
+        security: Arc<SecurityPolicy>,
+        provider_runtime_options: ProviderRuntimeOptions,
+        root_config: Option<Arc<Config>>,
+    ) -> Self {
         Self {
             agents: Arc::new(agents),
             security,
             provider_runtime_options,
+            root_config,
             depth: 0,
         }
     }
@@ -63,10 +77,21 @@ impl DelegateTool {
         depth: u32,
         provider_runtime_options: ProviderRuntimeOptions,
     ) -> Self {
+        Self::with_depth_options_and_config(agents, security, depth, provider_runtime_options, None)
+    }
+
+    pub fn with_depth_options_and_config(
+        agents: HashMap<String, DelegateAgentConfig>,
+        security: Arc<SecurityPolicy>,
+        depth: u32,
+        provider_runtime_options: ProviderRuntimeOptions,
+        root_config: Option<Arc<Config>>,
+    ) -> Self {
         Self {
             agents: Arc::new(agents),
             security,
             provider_runtime_options,
+            root_config,
             depth,
         }
     }
@@ -177,19 +202,33 @@ impl Tool for DelegateTool {
             return Ok(ToolResult::error(error));
         }
 
-        let provider: Box<dyn Provider> = match create_backend_inference_provider(
-            None,
-            None,
-            None,
-            &self.provider_runtime_options,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                return Ok(ToolResult::error(format!(
-                    "Failed to create inference client for delegate agent '{agent_name}': {e}"
-                )));
-            }
-        };
+        let (provider, resolved_model): (Box<dyn Provider>, String) =
+            if let Some(root_config) = self.root_config.as_ref() {
+                let mut effective = (**root_config).clone();
+                effective.default_model = Some(agent_config.model.clone());
+                match create_chat_provider("agentic", &effective) {
+                    Ok((p, model)) => (p, model),
+                    Err(e) => {
+                        return Ok(ToolResult::error(format!(
+                        "Failed to create inference client for delegate agent '{agent_name}': {e}"
+                    )));
+                    }
+                }
+            } else {
+                match create_backend_inference_provider(
+                    None,
+                    None,
+                    None,
+                    &self.provider_runtime_options,
+                ) {
+                    Ok(p) => (p, agent_config.model.clone()),
+                    Err(e) => {
+                        return Ok(ToolResult::error(format!(
+                        "Failed to create inference client for delegate agent '{agent_name}': {e}"
+                    )));
+                    }
+                }
+            };
 
         // Build the message
         let full_prompt = if context.is_empty() {
@@ -207,7 +246,7 @@ impl Tool for DelegateTool {
             provider.chat_with_system(
                 agent_config.system_prompt.as_deref(),
                 &full_prompt,
-                &agent_config.model,
+                &resolved_model,
                 temperature,
             ),
         )
@@ -231,7 +270,7 @@ impl Tool for DelegateTool {
 
                 Ok(ToolResult::success(format!(
                     "[Agent '{agent_name}' ({}/{})]\n{rendered}",
-                    INFERENCE_BACKEND_ID, agent_config.model
+                    INFERENCE_BACKEND_ID, resolved_model
                 )))
             }
             Err(e) => Ok(ToolResult::error(format!(

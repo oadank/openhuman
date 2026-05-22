@@ -385,6 +385,7 @@ const it5: TranslationMap = {
   'composio.reconnect': 'Riconnetti',
   'composio.directModeRequiresKey':
     'Salvataggio fallito. La modalità Diretta richiede una chiave API non vuota.',
+  'composio.triggersTitle': 'Trigger Composio',
   'composio.notYetRouted': 'non ancora instradato',
   'composio.triggers.loading': 'Caricamento…',
   'conversations.taskKanban.todo': 'Da fare',

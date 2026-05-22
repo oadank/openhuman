@@ -135,8 +135,8 @@ impl TriageOutcome {
 
 /// Run the triage classifier with the full tiered fallback chain.
 ///
-/// 1. Resolve the cloud provider.
-/// 2. Try cloud; on 429 / transient, sleep and retry once.
+/// 1. Resolve the configured external provider.
+/// 2. Try the external provider; on 429 / transient, sleep and retry once.
 /// 3. On a second 429 / transient, build the local provider and
 ///    fall back to it (acquiring the global LLM permit).
 /// 4. On local failure, return `TriageOutcome::Deferred` so the

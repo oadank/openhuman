@@ -11,7 +11,8 @@
 //! "<slug>:<model>"   → cloud_providers entry keyed by slug;
 //!                      builds OpenAiCompatibleProvider (Bearer) or Anthropic
 //!                      flavour depending on auth_style.
-//! ""  / missing      → falls back to primary_cloud / first configured provider.
+//! ""  / missing      → chat roles use `default_model`; other roles fall
+//!                      back to primary_cloud / first configured provider.
 //! ```
 //!
 //! Unknown slugs and missing-creds configurations produce actionable errors.
@@ -60,6 +61,11 @@ pub fn provider_for_role(role: &str, config: &Config) -> String {
     // routing toggle; treat it identically to empty/cloud so it falls through
     // to the primary-provider resolution below rather than erroring.
     if s.is_empty() || s == "cloud" || s == "openhuman" {
+        if is_chat_role(role) {
+            if let Some(default_provider) = default_provider_for_chat(config) {
+                return default_provider;
+            }
+        }
         // When no explicit per-workload provider is set, resolve
         // primary_cloud. If it is missing or stale, fall back to the
         // first configured provider (typically the migration-seeded
@@ -81,6 +87,80 @@ pub fn provider_for_role(role: &str, config: &Config) -> String {
     } else {
         s.to_string()
     }
+}
+
+fn is_chat_role(role: &str) -> bool {
+    matches!(role, "chat" | "reasoning" | "agentic" | "coding")
+}
+
+fn primary_or_first_provider_slug(config: &Config) -> Option<String> {
+    let primary_slug = config.primary_cloud.as_deref().and_then(|pid| {
+        config
+            .cloud_providers
+            .iter()
+            .find(|e| e.id == pid)
+            .map(|e| e.slug.clone())
+    });
+    primary_slug.or_else(|| config.cloud_providers.first().map(|e| e.slug.clone()))
+}
+
+/// Resolve the model configured by Settings → AI → Chat and conversations.
+///
+/// `default_model` is allowed to be either a full provider string
+/// (`openai:gpt-5.4`, `ollama:llama3.1:8b`) or an old bare model id. Bare
+/// model ids are attached to the primary/first provider so old hand-written
+/// configs continue to route to the user's external provider instead of the
+/// removed OpenHuman backend.
+fn default_provider_for_chat(config: &Config) -> Option<String> {
+    let raw = config.default_model.as_deref()?.trim();
+    if raw.is_empty() || raw == "cloud" || raw == "openhuman" {
+        return None;
+    }
+
+    if let Some((slug, model)) = raw.split_once(':') {
+        let slug = slug.trim();
+        let model = model.trim();
+        if slug.is_empty() || model.is_empty() || slug == "cloud" || slug == "openhuman" {
+            return None;
+        }
+        if slug == "ollama"
+            || config
+                .cloud_providers
+                .iter()
+                .any(|entry| entry.slug == slug)
+        {
+            return Some(format!("{slug}:{model}"));
+        }
+        return None;
+    }
+
+    primary_or_first_provider_slug(config).map(|slug| format!("{slug}:{raw}"))
+}
+
+/// Resolve a top-level default model for a specific external-provider slug.
+///
+/// This is used when a provider string names a provider but leaves the model
+/// blank (`"openai:"`). Older configs and a few default workload routes use
+/// that shape. The first-class source is now `Config::default_model`; the
+/// legacy per-provider `default_model` field is only a fallback.
+pub(crate) fn default_model_for_slug(config: &Config, slug: &str) -> Option<String> {
+    let raw = config.default_model.as_deref()?.trim();
+    if raw.is_empty() || raw == "cloud" || raw == "openhuman" {
+        return None;
+    }
+
+    if let Some((default_slug, model)) = raw.split_once(':') {
+        let default_slug = default_slug.trim();
+        let model = model.trim();
+        if default_slug == slug && !model.is_empty() {
+            return Some(model.to_string());
+        }
+        return None;
+    }
+
+    primary_or_first_provider_slug(config)
+        .filter(|default_slug| default_slug == slug)
+        .map(|_| raw.to_string())
 }
 
 /// Build a `(Provider, model)` for the given workload role.
@@ -121,7 +201,7 @@ pub fn create_chat_provider_from_string(
 
     // (Removed) Session gate — the OpenHuman backend session is gone
     // in the local-OAuth refactor; every workload now uses the user's
-    // own cloud provider (or local Ollama). The gate's purpose
+    // own external provider (or local Ollama). The gate's purpose
     // ("custom providers require an app-session JWT") no longer
     // applies in a single-user local desktop.
 
@@ -203,6 +283,7 @@ fn make_ollama_provider(
         redact_endpoint(&endpoint)
     );
     let p = make_openai_compatible_provider_with_config(
+        "ollama",
         &endpoint,
         "",
         CompatAuthStyle::None,
@@ -227,7 +308,7 @@ fn make_cloud_provider_by_slug(
             .map(|e| e.slug.as_str())
             .collect();
         anyhow::anyhow!(
-            "[chat-factory] no cloud provider configured for slug '{}' (role '{}') — \
+            "[chat-factory] no external provider configured for slug '{}' (role '{}') — \
              add an entry with that slug to cloud_providers in config.toml. \
              Configured slugs: [{}]",
             slug,
@@ -236,10 +317,13 @@ fn make_cloud_provider_by_slug(
         )
     })?;
 
-    // Resolve effective model: use provided model if non-empty, else fall back
-    // to the entry's legacy default_model (if any), else empty → error.
+    // Resolve effective model: use provided model if non-empty, else the new
+    // top-level chat default for this slug, then the entry's legacy
+    // default_model (if any), else empty → error.
     let effective_model = if model.trim().is_empty() {
-        entry.default_model.clone().unwrap_or_default()
+        default_model_for_slug(config, slug)
+            .or_else(|| entry.default_model.clone())
+            .unwrap_or_default()
     } else {
         model.to_string()
     };
@@ -267,6 +351,7 @@ fn make_cloud_provider_by_slug(
     match entry.auth_style {
         AuthStyle::Anthropic => {
             let p = make_openai_compatible_provider_with_config(
+                slug,
                 &entry.endpoint,
                 &key,
                 CompatAuthStyle::Anthropic,
@@ -276,6 +361,7 @@ fn make_cloud_provider_by_slug(
         }
         AuthStyle::None => {
             let p = make_openai_compatible_provider_with_config(
+                slug,
                 &entry.endpoint,
                 "",
                 CompatAuthStyle::None,
@@ -285,6 +371,7 @@ fn make_cloud_provider_by_slug(
         }
         AuthStyle::Bearer => {
             let p = make_openai_compatible_provider_with_config(
+                slug,
                 &entry.endpoint,
                 &key,
                 CompatAuthStyle::Bearer,
@@ -340,12 +427,19 @@ fn make_openai_compatible_provider(
     api_key: &str,
     auth_style: CompatAuthStyle,
 ) -> anyhow::Result<Box<dyn Provider>> {
-    make_openai_compatible_provider_with_config(endpoint, api_key, auth_style, &[])
+    make_openai_compatible_provider_with_config(
+        "openai_compatible",
+        endpoint,
+        api_key,
+        auth_style,
+        &[],
+    )
 }
 
 /// Build an `OpenAiCompatibleProvider` with auth style and temperature
 /// suppression list from config.
 fn make_openai_compatible_provider_with_config(
+    provider_name: &str,
     endpoint: &str,
     api_key: &str,
     auth_style: CompatAuthStyle,
@@ -357,7 +451,7 @@ fn make_openai_compatible_provider_with_config(
         Some(api_key)
     };
     Ok(Box::new(
-        OpenAiCompatibleProvider::new("cloud", endpoint, key, auth_style)
+        OpenAiCompatibleProvider::new(provider_name, endpoint, key, auth_style)
             .with_temperature_unsupported_models(temperature_unsupported_models.to_vec()),
     ))
 }

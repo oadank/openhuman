@@ -64,7 +64,7 @@ const ru1: TranslationMap = {
   'settings.aiModels': 'AI и модели',
   'settings.aiModelsDesc': 'Настройка локальных AI-моделей, загрузки и LLM-провайдер',
   'settings.ai': 'Настройки AI',
-  'settings.aiDesc': 'Облачные провайдеры, локальные модели Ollama и маршрутизация по задачам',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'Повторить тур',
   'settings.restartTourDesc': 'Запустить обучение заново с самого начала',
   'settings.about': 'О приложении',

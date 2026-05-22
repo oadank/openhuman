@@ -276,18 +276,18 @@ pub struct ModelSettingsPatch {
     pub default_temperature: Option<f64>,
     /// When `Some`, REPLACES the entire `config.model_routes` array with the
     /// supplied (hint, model) pairs. Pass `Some(vec![])` to clear all routes
-    /// (e.g. when switching back to the OpenHuman backend whose built-in
-    /// router picks per-task models on its own). Leave `None` to keep the
+    /// (e.g. when switching back to workload-level provider strings).
+    /// Leave `None` to keep the
     /// current routes untouched.
     pub model_routes: Option<Vec<crate::openhuman::config::ModelRouteConfig>>,
     /// When `Some`, REPLACES the entire `config.cloud_providers` array with
     /// the supplied entries (each lacking the API key — those live in
     /// `auth-profiles.json` via [`crate::openhuman::credentials::AuthService`]).
-    /// Pass `Some(vec![])` to clear all third-party cloud providers.
+    /// Pass `Some(vec![])` to clear all external providers.
     pub cloud_providers:
         Option<Vec<crate::openhuman::config::schema::cloud_providers::CloudProviderCreds>>,
-    /// Id of the `cloud_providers` entry used when a workload routes to
-    /// `"cloud"`. Empty string clears (factory falls back to OpenHuman).
+    /// Legacy id of the `cloud_providers` entry used by old `"cloud"`
+    /// workload sentinels. Empty string clears it.
     pub primary_cloud: Option<String>,
     pub chat_provider: Option<String>,
     pub reasoning_provider: Option<String>,
@@ -426,8 +426,7 @@ pub async fn apply_model_settings(
         config.default_temperature = temp;
     }
     if let Some(routes) = update.model_routes {
-        // Full replacement — UI sends the canonical set for the active provider
-        // (or an empty vec when switching back to the OpenHuman in-built router).
+        // Full replacement — UI sends the canonical set for the active provider.
         config.model_routes = routes;
     }
     if let Some(providers) = update.cloud_providers {
@@ -1092,7 +1091,7 @@ pub async fn load_and_apply_dictation_settings(
             _ => {
                 return Err(format!(
                     "invalid activation_mode: {mode} (valid: toggle, push)"
-                ))
+                ));
             }
         }
     }
@@ -1171,7 +1170,7 @@ pub async fn load_and_apply_voice_server_settings(
             _ => {
                 return Err(format!(
                     "invalid activation_mode: {mode} (valid: tap, push)"
-                ))
+                ));
             }
         }
     }

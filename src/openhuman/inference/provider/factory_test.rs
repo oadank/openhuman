@@ -40,6 +40,13 @@ fn openai_entry(id: &str, slug: &str) -> CloudProviderCreds {
     }
 }
 
+fn openai_entry_without_legacy_default(id: &str, slug: &str) -> CloudProviderCreds {
+    CloudProviderCreds {
+        default_model: None,
+        ..openai_entry(id, slug)
+    }
+}
+
 fn anthropic_entry(id: &str, slug: &str) -> CloudProviderCreds {
     CloudProviderCreds {
         id: id.to_string(),
@@ -185,6 +192,71 @@ fn all_workloads_default_to_empty_when_no_providers() {
 }
 
 #[test]
+fn chat_workloads_default_to_config_default_model_when_provider_exists() {
+    let mut config = config_with_providers(vec![openai_entry("p_oai", "openai")]);
+    config.primary_cloud = Some("p_oai".to_string());
+    config.default_model = Some("openai:gpt-5.4".to_string());
+
+    for role in &["chat", "reasoning", "agentic", "coding"] {
+        assert_eq!(
+            provider_for_role(role, &config),
+            "openai:gpt-5.4",
+            "role={role} should use the chat default model"
+        );
+    }
+    assert_eq!(
+        provider_for_role("memory", &config),
+        "openai:",
+        "background defaults still use the provider default model path"
+    );
+}
+
+#[test]
+fn bare_default_model_attaches_to_primary_provider_for_chat_roles() {
+    let mut config = config_with_providers(vec![openai_entry("p_oai", "openai")]);
+    config.primary_cloud = Some("p_oai".to_string());
+    config.default_model = Some("gpt-4o-mini".to_string());
+
+    assert_eq!(
+        provider_for_role("reasoning", &config),
+        "openai:gpt-4o-mini"
+    );
+}
+
+#[test]
+fn empty_model_provider_string_uses_top_level_default_model() {
+    let mut config =
+        config_with_providers(vec![openai_entry_without_legacy_default("p_oai", "openai")]);
+    config.primary_cloud = Some("p_oai".to_string());
+    config.default_model = Some("openai:gpt-5.4".to_string());
+
+    let (_, model) = create_chat_provider_from_string("memory", "openai:", &config)
+        .expect("empty provider model should use Config::default_model");
+    assert_eq!(model, "gpt-5.4");
+}
+
+#[test]
+fn bare_top_level_default_model_applies_to_empty_primary_provider_string() {
+    let mut config =
+        config_with_providers(vec![openai_entry_without_legacy_default("p_oai", "openai")]);
+    config.primary_cloud = Some("p_oai".to_string());
+    config.default_model = Some("gpt-4o-mini".to_string());
+
+    let (_, model) = create_chat_provider_from_string("heartbeat", "openai:", &config)
+        .expect("bare default model should attach to primary provider");
+    assert_eq!(model, "gpt-4o-mini");
+}
+
+#[test]
+fn unknown_default_model_slug_is_ignored() {
+    let mut config = config_with_providers(vec![openai_entry("p_oai", "openai")]);
+    config.primary_cloud = Some("p_oai".to_string());
+    config.default_model = Some("missing:gpt-x".to_string());
+
+    assert_eq!(provider_for_role("reasoning", &config), "openai:");
+}
+
+#[test]
 fn workload_override_respected() {
     let mut config = Config::default();
     config.heartbeat_provider = Some("ollama:llama3.2:3b".to_string());
@@ -213,7 +285,7 @@ fn unknown_slug_rejected() {
         .expect("unknown slug must fail");
     assert!(
         err.to_string()
-            .contains("no cloud provider configured for slug"),
+            .contains("no external provider configured for slug"),
         "{err}"
     );
 }
@@ -247,7 +319,7 @@ fn missing_slug_for_openai_gives_clear_error() {
         .expect("missing slug must fail");
     let msg = err.to_string();
     assert!(
-        msg.contains("no cloud provider configured for slug 'openai'"),
+        msg.contains("no external provider configured for slug 'openai'"),
         "{msg}"
     );
 }
@@ -264,7 +336,7 @@ async fn cloud_provider_without_stored_key_fails_with_actionable_error() {
         .await
         .expect_err("missing key should fail at call time");
     assert!(
-        err.to_string().contains("cloud API key not set"),
+        err.to_string().contains("openai API key not set"),
         "expected missing-key guidance, got: {err}"
     );
 }

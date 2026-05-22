@@ -205,6 +205,19 @@ pub async fn inference_list_models(provider_id: &str) -> Result<RpcOutcome<Value
     result
 }
 
+pub async fn inference_test_provider(
+    provider_id: &str,
+    model: Option<&str>,
+) -> Result<RpcOutcome<Value>, String> {
+    debug!(provider_id, model, "{LOG_PREFIX} test_provider:start");
+    let result = providers::ops::test_configured_provider(provider_id, model).await;
+    match &result {
+        Ok(_) => debug!("{LOG_PREFIX} test_provider:ok"),
+        Err(err) => error!(error = %err, "{LOG_PREFIX} test_provider:error"),
+    }
+    result
+}
+
 pub async fn inference_device_profile() -> Result<RpcOutcome<Value>, String> {
     debug!("{LOG_PREFIX} device_profile:start");
     let profile = device::detect_device_profile();

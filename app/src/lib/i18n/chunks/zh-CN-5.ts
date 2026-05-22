@@ -370,6 +370,7 @@ const zhCN5: TranslationMap = {
   'composio.authExpired': '授权已过期',
   'composio.reconnect': '重新连接',
   'composio.directModeRequiresKey': '保存失败。直连模式需要非空的 API 密钥。',
+  'composio.triggersTitle': 'Composio 触发器',
   'composio.notYetRouted': '尚未路由',
   'composio.triggers.loading': '加载中…',
   'conversations.taskKanban.todo': '待办',

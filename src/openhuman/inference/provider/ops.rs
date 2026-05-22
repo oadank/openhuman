@@ -1,11 +1,13 @@
 use super::*;
 
+use crate::openhuman::config::schema::cloud_providers::{AuthStyle, CloudProviderCreds};
 use serde::Serialize;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 const MAX_API_ERROR_CHARS: usize = 200;
 
-/// Fixed id for the single inference backend (OpenHuman API).
+/// Legacy provider id used by older routing wrappers.
 pub const INFERENCE_BACKEND_ID: &str = "openhuman";
 
 #[derive(Debug, Clone)]
@@ -24,6 +26,21 @@ pub struct ModelInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
 }
+
+#[derive(Debug, Serialize)]
+pub struct ProviderTestReport {
+    pub ok: bool,
+    pub provider_id: String,
+    pub provider_slug: String,
+    pub model: String,
+    pub latency_ms: u128,
+    pub response_preview: String,
+}
+
+const PROVIDER_TEST_TIMEOUT_SECS: u64 = 45;
+const PROVIDER_TEST_SYSTEM_PROMPT: &str = "You are validating that a user-owned LLM provider is reachable. Reply only with the requested token.";
+const PROVIDER_TEST_USER_PROMPT: &str =
+    "Reply with exactly this token and no extra text: openhuman-provider-ok";
 
 pub async fn list_configured_models(
     provider_id: &str,
@@ -44,12 +61,17 @@ pub async fn list_configured_models(
         .iter()
         .find(|e| e.id == provider_id || e.slug == provider_id)
         .cloned()
-        .ok_or_else(|| format!("no cloud provider with id or slug '{}' found", provider_id))?;
+        .ok_or_else(|| {
+            format!(
+                "no external provider with id or slug '{}' found",
+                provider_id
+            )
+        })?;
 
     let base = entry.endpoint.trim().trim_end_matches('/');
     if base.is_empty() {
         return Err(format!(
-            "cloud provider '{}' has an empty endpoint; configure one in Settings → AI",
+            "provider '{}' has an empty endpoint; configure one in Settings → AI",
             entry.slug
         ));
     }
@@ -59,7 +81,7 @@ pub async fn list_configured_models(
     // before we hit the reqwest builder's opaque "builder error" later.
     let parsed_url = reqwest::Url::parse(&models_url).map_err(|e| {
         format!(
-            "cloud provider '{}' endpoint '{}' is not a valid URL ({}); \
+            "provider '{}' endpoint '{}' is not a valid URL ({}); \
              expected something like `http://127.0.0.1:11434/v1`",
             entry.slug, entry.endpoint, e
         )
@@ -191,6 +213,143 @@ pub async fn list_configured_models(
         serde_json::json!({ "models": models }),
         vec![format!("fetched {} models", models.len())],
     ))
+}
+
+pub async fn test_configured_provider(
+    provider_id: &str,
+    requested_model: Option<&str>,
+) -> Result<crate::rpc::RpcOutcome<serde_json::Value>, String> {
+    let provider_id = provider_id.trim();
+    if provider_id.is_empty() {
+        return Err("provider_id must not be empty".to_string());
+    }
+
+    let config = crate::openhuman::config::Config::load_or_init()
+        .await
+        .map_err(|e| e.to_string())?;
+    let entry = find_provider_entry(&config, provider_id)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "no external provider with id or slug '{}' found",
+                provider_id
+            )
+        })?;
+
+    let model = resolve_provider_test_model(&config, &entry, requested_model)?;
+    ensure_provider_has_required_auth(&config, &entry)?;
+
+    let provider_string = format!("{}:{}", entry.slug, model);
+    let (provider, resolved_model) =
+        crate::openhuman::inference::provider::factory::create_chat_provider_from_string(
+            "reasoning",
+            &provider_string,
+            &config,
+        )
+        .map_err(|e| e.to_string())?;
+
+    let started = Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(PROVIDER_TEST_TIMEOUT_SECS),
+        provider.chat_with_system(
+            Some(PROVIDER_TEST_SYSTEM_PROMPT),
+            PROVIDER_TEST_USER_PROMPT,
+            &resolved_model,
+            0.0,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        format!(
+            "provider '{}' did not respond within {}s",
+            entry.slug, PROVIDER_TEST_TIMEOUT_SECS
+        )
+    })?
+    .map_err(|e| sanitize_api_error(&format_anyhow_chain(&e)))?;
+
+    let preview = crate::openhuman::util::truncate_with_ellipsis(result.trim(), 160);
+    if preview.is_empty() {
+        return Err(format!(
+            "provider '{}' returned an empty response for model '{}'",
+            entry.slug, resolved_model
+        ));
+    }
+
+    let report = ProviderTestReport {
+        ok: true,
+        provider_id: entry.id.clone(),
+        provider_slug: entry.slug.clone(),
+        model: resolved_model,
+        latency_ms: started.elapsed().as_millis(),
+        response_preview: preview,
+    };
+
+    Ok(crate::rpc::RpcOutcome::new(
+        serde_json::to_value(report).map_err(|e| e.to_string())?,
+        vec![format!("provider '{}' test completed", entry.slug)],
+    ))
+}
+
+fn find_provider_entry<'a>(
+    config: &'a crate::openhuman::config::Config,
+    provider_id: &str,
+) -> Option<&'a CloudProviderCreds> {
+    config
+        .cloud_providers
+        .iter()
+        .find(|entry| entry.id == provider_id || entry.slug == provider_id)
+}
+
+fn resolve_provider_test_model(
+    config: &crate::openhuman::config::Config,
+    entry: &CloudProviderCreds,
+    requested_model: Option<&str>,
+) -> Result<String, String> {
+    if let Some(model) = requested_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+    {
+        return Ok(model.to_string());
+    }
+
+    if let Some(model) =
+        crate::openhuman::inference::provider::factory::default_model_for_slug(config, &entry.slug)
+    {
+        return Ok(model);
+    }
+
+    if let Some(model) = entry
+        .default_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+    {
+        return Ok(model.to_string());
+    }
+
+    Err(format!(
+        "no model selected for provider '{}'; choose a Chat and conversations default model first",
+        entry.slug
+    ))
+}
+
+fn ensure_provider_has_required_auth(
+    config: &crate::openhuman::config::Config,
+    entry: &CloudProviderCreds,
+) -> Result<(), String> {
+    if entry.auth_style == AuthStyle::None {
+        return Ok(());
+    }
+    let key =
+        crate::openhuman::inference::provider::factory::lookup_key_for_slug(&entry.slug, config)
+            .map_err(|e| e.to_string())?;
+    if key.trim().is_empty() {
+        return Err(format!(
+            "no API key is stored for provider '{}'; reconnect it in Settings → AI",
+            entry.slug
+        ));
+    }
+    Ok(())
 }
 
 impl Default for ProviderRuntimeOptions {
@@ -462,7 +621,7 @@ pub fn create_resilient_provider_with_options(
 ) -> anyhow::Result<Box<dyn Provider>> {
     if !reliability.fallback_providers.is_empty() {
         tracing::warn!(
-            "reliability.fallback_providers is ignored; inference uses only the OpenHuman backend"
+            "reliability.fallback_providers is ignored; inference uses the configured external provider route"
         );
     }
 
@@ -680,11 +839,11 @@ pub struct ProviderInfo {
     pub local: bool,
 }
 
-/// Return known providers for display (single backend path).
+/// Return known providers for legacy display surfaces.
 pub fn list_providers() -> Vec<ProviderInfo> {
     vec![ProviderInfo {
         name: INFERENCE_BACKEND_ID,
-        display_name: "OpenHuman (backend)",
+        display_name: "Configured external provider",
         aliases: &["backend", "openhuman-backend"],
         local: false,
     }]
@@ -832,6 +991,76 @@ mod tests {
             "url without key should build cleanly: {:?}",
             provider.err()
         );
+    }
+
+    #[test]
+    fn provider_test_model_uses_explicit_model_first() {
+        use crate::openhuman::config::schema::cloud_providers::CloudProviderCreds;
+
+        let mut config = crate::openhuman::config::Config::default();
+        let entry = CloudProviderCreds {
+            id: "p_openai".to_string(),
+            slug: "openai".to_string(),
+            default_model: Some("gpt-fallback".to_string()),
+            ..Default::default()
+        };
+        config.default_model = Some("openai:gpt-default".to_string());
+        config.cloud_providers.push(entry.clone());
+
+        let model = resolve_provider_test_model(&config, &entry, Some(" gpt-explicit "))
+            .expect("explicit model should resolve");
+        assert_eq!(model, "gpt-explicit");
+    }
+
+    #[test]
+    fn provider_test_model_uses_matching_chat_default() {
+        use crate::openhuman::config::schema::cloud_providers::CloudProviderCreds;
+
+        let mut config = crate::openhuman::config::Config::default();
+        let entry = CloudProviderCreds {
+            id: "p_openai".to_string(),
+            slug: "openai".to_string(),
+            ..Default::default()
+        };
+        config.default_model = Some("openai:gpt-5.4".to_string());
+        config.cloud_providers.push(entry.clone());
+
+        let model = resolve_provider_test_model(&config, &entry, None)
+            .expect("matching default model should resolve");
+        assert_eq!(model, "gpt-5.4");
+    }
+
+    #[test]
+    fn provider_test_model_errors_without_any_model() {
+        use crate::openhuman::config::schema::cloud_providers::CloudProviderCreds;
+
+        let mut config = crate::openhuman::config::Config::default();
+        let entry = CloudProviderCreds {
+            id: "p_anthropic".to_string(),
+            slug: "anthropic".to_string(),
+            ..Default::default()
+        };
+        config.default_model = Some("openai:gpt-5.4".to_string());
+        config.cloud_providers.push(entry.clone());
+
+        let err = resolve_provider_test_model(&config, &entry, None).expect_err("must fail");
+        assert!(err.contains("Chat and conversations default model"));
+    }
+
+    #[test]
+    fn provider_test_auth_none_does_not_require_key() {
+        use crate::openhuman::config::schema::cloud_providers::{AuthStyle, CloudProviderCreds};
+
+        let mut config = crate::openhuman::config::Config::default();
+        let entry = CloudProviderCreds {
+            id: "p_proxy".to_string(),
+            slug: "proxy".to_string(),
+            auth_style: AuthStyle::None,
+            ..Default::default()
+        };
+        config.cloud_providers.push(entry.clone());
+
+        ensure_provider_has_required_auth(&config, &entry).expect("auth none should not need key");
     }
 
     #[test]

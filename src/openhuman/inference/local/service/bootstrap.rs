@@ -414,7 +414,7 @@ fn config_with_recommended_tier_if_unselected(config: &Config, device: &DevicePr
             min_required_gb = crate::openhuman::inference::presets::MIN_RAM_GB_FOR_LOCAL_AI,
             ?current_tier,
             selected_tier = ?config.local_ai.selected_tier,
-            "[local_ai] bootstrap: opt_in_confirmed=false, hard-overriding to disabled (cloud fallback)"
+            "[local_ai] bootstrap: opt_in_confirmed=false, hard-overriding to disabled (external-provider fallback)"
         );
         let mut effective_config = config.clone();
         effective_config.local_ai.runtime_enabled = false;

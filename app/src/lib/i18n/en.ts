@@ -67,7 +67,7 @@ const en: TranslationMap = {
   'settings.aiModels': 'AI & Models',
   'settings.aiModelsDesc': 'Local AI model setup, downloads, and LLM provider',
   'settings.ai': 'AI Configuration',
-  'settings.aiDesc': 'Cloud providers, local Ollama models, and per-workload routing',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'Restart Tour',
   'settings.restartTourDesc': 'Replay the product walkthrough from the beginning',
   'settings.about': 'About',
@@ -650,7 +650,7 @@ const en: TranslationMap = {
   'localModel.downloadModels': 'Download Models',
   'localModel.usage': 'Usage',
   'localModel.usageDesc':
-    'Choose which subsystems run on the local model. Anything off uses the cloud.',
+    'Choose which subsystems run on the local model. Anything off uses your external provider.',
   'localModel.enableRuntime': 'Enable local AI runtime',
   'localModel.enableRuntimeDesc':
     'Master switch. Off by default — Ollama stays idle. When on, the tree summarizer, screen intelligence, and autocomplete always use the local model.',
@@ -1410,7 +1410,7 @@ const en: TranslationMap = {
   'privacy.dataKind.metadata': 'Metadata',
   'privacy.dataKind.raw': 'Raw',
   'privacy.whatLeaves.link.label': 'What leaves my computer?',
-  'settings.ai.addCloudProvider': 'Add cloud provider',
+  'settings.ai.addCloudProvider': 'Add external provider',
   'settings.ai.addProvider': 'Add Provider',
   'settings.ai.apiKeyFieldLabel': 'API Key',
   'settings.ai.apiKeyRequired': 'Please paste your API key to continue.',
@@ -1419,7 +1419,7 @@ const en: TranslationMap = {
   'settings.ai.clearStoredKey': 'Clear stored key',
   'settings.ai.connectProvider': 'Connect {label}',
   'settings.ai.customRouting': 'Custom routing',
-  'settings.ai.defaultResolvesTo': 'OpenHuman',
+  'settings.ai.defaultResolvesTo': 'Default chat rows use',
   'settings.ai.discard': 'Discard',
   'settings.ai.editProvider': 'Edit {label}',
   'settings.ai.llmProviders': 'LLM Providers',
@@ -1516,7 +1516,7 @@ const en: TranslationMap = {
   'settings.localModel.deviceCapability.detected': 'Detected',
   'settings.localModel.deviceCapability.disabled': 'Disabled',
   'settings.localModel.deviceCapability.disabledDesc':
-    'Local AI is off. All inference uses the cloud.',
+    'Local AI is off. Inference uses your configured external provider.',
   'settings.localModel.deviceCapability.downloadingModels': '(downloading models)',
   'settings.localModel.deviceCapability.downloadingSetupDesc':
     'Downloading the OllamaSetup installer (~2 GB) and unpacking it. This can take a minute on first install.',
@@ -1527,12 +1527,12 @@ const en: TranslationMap = {
     'The installer exited before Ollama was usable. Click retry to try again, or install manually from ollama.com.',
   'settings.localModel.deviceCapability.installFirst': 'Run Ollama first.',
   'settings.localModel.deviceCapability.installFirstDesc':
-    'Local tiers depend on an externally managed Ollama endpoint. Start it yourself, pull the models you want, and keep using "Disabled (cloud fallback)" until the runtime is reachable.',
+    'Local tiers depend on an externally managed Ollama endpoint. Start it yourself, pull the models you want, and keep using "Disabled (external fallback)" until the runtime is reachable.',
   'settings.localModel.deviceCapability.installOllamaFirst': 'Run Ollama first to use this tier',
   'settings.localModel.deviceCapability.installingOllama': 'Installing Ollama',
   'settings.localModel.deviceCapability.loadingDeviceInfo': 'Loading device info',
   'settings.localModel.deviceCapability.localAiDisabled':
-    'Local AI disabled — using cloud fallback.',
+    'Local AI disabled — using external provider fallback.',
   'settings.localModel.deviceCapability.modelTier': 'Model Tier',
   'settings.localModel.deviceCapability.needsOllama': 'Needs Ollama',
   'settings.localModel.deviceCapability.notDetected': 'Not detected',

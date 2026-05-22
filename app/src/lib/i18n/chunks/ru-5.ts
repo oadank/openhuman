@@ -382,6 +382,7 @@ const ru5: TranslationMap = {
   'composio.authExpired': 'Срок авторизации истёк',
   'composio.reconnect': 'Переподключить',
   'composio.directModeRequiresKey': 'Не удалось сохранить. Прямой режим требует непустой API-ключ.',
+  'composio.triggersTitle': 'Триггеры Composio',
   'composio.notYetRouted': 'пока не маршрутизируется',
   'composio.triggers.loading': 'Загрузка…',
   'conversations.taskKanban.todo': 'К выполнению',

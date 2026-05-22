@@ -363,7 +363,7 @@ pub fn all_tools_with_runtime(
             .iter()
             .map(|(name, cfg)| (name.clone(), cfg.clone()))
             .collect();
-        tools.push(Box::new(DelegateTool::new_with_options(
+        tools.push(Box::new(DelegateTool::new_with_options_and_config(
             delegate_agents,
             security.clone(),
             crate::openhuman::inference::provider::ProviderRuntimeOptions {
@@ -375,6 +375,7 @@ pub fn all_tools_with_runtime(
                 secrets_encrypt: root_config.secrets.encrypt,
                 reasoning_enabled: root_config.runtime.reasoning_enabled,
             },
+            Some(Arc::new(root_config.clone())),
         )));
     }
 

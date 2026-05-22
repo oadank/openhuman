@@ -25,7 +25,7 @@ pub const DEFAULT_OPENAI_SLUG: &str = "openai";
 
 /// Default chat model used when no explicit model is configured.
 ///
-/// Routes through the seeded OpenAI cloud provider (see
+/// Routes through the seeded OpenAI external provider (see
 /// [`DEFAULT_OPENAI_SLUG`]) via the `/v1/responses` endpoint with
 /// `reasoning.effort = "medium"` (see
 /// [`crate::openhuman::inference::provider::compatible_types::ResponsesReasoning`]).
@@ -194,7 +194,9 @@ pub struct Config {
     //
     // Provider-string grammar (consumed by `providers::factory`):
     //
-    //   "cloud"                → resolves to `primary_cloud`.
+    //   "" / None              → chat workloads resolve through `default_model`;
+    //                            background workloads resolve through
+    //                            `primary_cloud` / first configured provider.
     //   "openai:<model>"       → look up cloud_providers entry of type=openai;
     //                            build OpenAiCompatibleProvider with Bearer auth
     //   "anthropic:<model>"    → type=anthropic; Bearer auth on the compat endpoint
@@ -202,14 +204,14 @@ pub struct Config {
     //   "custom:<model>"       → type=custom; Bearer auth
     //   "ollama:<model>"       → local Ollama at config.local_ai.base_url
     //
-    // Per-workload fields default to None, which the factory treats as "cloud".
-    // Changing `primary_cloud` instantly re-routes every "cloud" workload.
-    /// Registered cloud providers. Entries are user-owned API key providers.
+    // Per-workload fields default to None. The legacy "cloud" sentinel is
+    // still read for migration/back-compat but should not be written by new UI.
+    /// Registered external providers. Entries are user-owned API key providers.
     #[serde(default)]
     pub cloud_providers: Vec<crate::openhuman::config::schema::cloud_providers::CloudProviderCreds>,
 
-    /// Id of the `cloud_providers` entry that "cloud" and "primary" resolve to.
-    /// When `None`, the factory requires an explicit configured provider.
+    /// Legacy id of the `cloud_providers` entry used by old "cloud" routes.
+    /// Chat defaults are now stored in `default_model`.
     #[serde(default)]
     pub primary_cloud: Option<String>,
 

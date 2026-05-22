@@ -1,12 +1,11 @@
 /*
  * AI settings — three orthogonal sections:
- *   1. Cloud providers (credentials + primary selection)
+ *   1. External providers (credentials + endpoint configuration)
  *   2. Local provider (Ollama runtime + installed models)
  *   3. Workload routing (8-row matrix; per-workload provider + model)
  *
- * "Primary cloud" is an abstraction: any workload set to "Primary" inherits
- * whichever cloud provider is currently marked primary. Overrides are explicit
- * per row, so the resolved provider+model is always rendered inline.
+ * "Default" is an abstraction: chat workloads inherit the Chat and
+ * conversations default model unless a row has an explicit override.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { LuCheck, LuCircleAlert } from 'react-icons/lu';
@@ -27,6 +26,7 @@ import {
   type ModelInfo,
   saveAISettings,
   setCloudProviderKey,
+  testCloudProvider,
 } from '../../../services/api/aiSettingsApi';
 import type { AuthStyle } from '../../../utils/tauriCommands/config';
 import {
@@ -174,7 +174,11 @@ const WORKLOADS: Workload[] = [
 // just derives the `maskedKey` display string from `has_api_key`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type AISettings = { cloudProviders: CloudProvider[]; routing: RoutingMap };
+type AISettings = {
+  cloudProviders: CloudProvider[];
+  chatDefault: ProviderRef;
+  routing: RoutingMap;
+};
 
 const EMPTY_ROUTING: RoutingMap = {
   chat: { kind: 'openhuman' },
@@ -188,7 +192,11 @@ const EMPTY_ROUTING: RoutingMap = {
   subconscious: { kind: 'openhuman' },
 };
 
-const EMPTY_SETTINGS: AISettings = { cloudProviders: [], routing: EMPTY_ROUTING };
+const EMPTY_SETTINGS: AISettings = {
+  cloudProviders: [],
+  chatDefault: { kind: 'openhuman' },
+  routing: EMPTY_ROUTING,
+};
 
 function maskKeyLabel(hasKey: boolean): string {
   return hasKey ? '•••• configured' : 'Not configured';
@@ -231,7 +239,7 @@ function toPanelRoutingFromApi(api: ApiAISettings): { panel: AISettings } {
     learning: liftRef(api.routing.learning),
     subconscious: liftRef(api.routing.subconscious),
   };
-  return { panel: { cloudProviders, routing } };
+  return { panel: { cloudProviders, chatDefault: liftRef(api.chatDefault), routing } };
 }
 
 function toApiSettings(panel: AISettings): ApiAISettings {
@@ -244,6 +252,7 @@ function toApiSettings(panel: AISettings): ApiAISettings {
       auth_style: p.authStyle,
       has_api_key: p.maskedKey.startsWith('••••'),
     })),
+    chatDefault: panel.chatDefault,
     routing: {
       chat: panel.routing.chat,
       reasoning: panel.routing.reasoning,
@@ -285,7 +294,7 @@ function useAISettings() {
     void reload();
   }, [reload]);
 
-  // Eagerly persist user-configured cloud providers whenever they diverge from
+  // Eagerly persist user-configured external providers whenever they diverge from
   // the saved snapshot so listProviderModels can resolve by slug immediately
   // after a provider is added, before the global Save. Reserved slugs
   // ("openhuman", "ollama", "cloud", "pid") are built-ins that Rust rejects as
@@ -395,7 +404,7 @@ function useInstalledModels(snapshot: LocalProviderSnapshot | null): OllamaModel
 // ─────────────────────────────────────────────────────────────────────────────
 
 // SectionLabel removed alongside its only call site (the old
-// "Cloud providers" / "Local provider" headings).
+// "External providers" / "Local provider" headings).
 
 // formatBytes / StatusDot / ProviderChip helpers removed alongside the
 // Local provider section + CloudProviderCard — no callers left.
@@ -477,6 +486,10 @@ const ProviderKeyDialog = ({
   const [phase, setPhase] = useState<'idle' | 'saving'>('idle');
   const [error, setError] = useState<string | null>(null);
   const busy = phase !== 'idle';
+  const connectTemplate = t('settings.ai.connectProvider');
+  const connectTitle = connectTemplate.includes('{label}')
+    ? connectTemplate.replace('{label}', label)
+    : `${connectTemplate} ${label}`;
 
   const placeholder =
     slug === 'openai'
@@ -512,7 +525,9 @@ const ProviderKeyDialog = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="w-full max-w-md rounded-2xl border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-soft">
         <div className="mb-4">
-          <h3 className="text-base font-semibold text-stone-900 dark:text-neutral-100">{`${t('settings.ai.connectProvider')} ${label}`}</h3>
+          <h3 className="text-base font-semibold text-stone-900 dark:text-neutral-100">
+            {connectTitle}
+          </h3>
           <p className="mt-0.5 text-xs text-stone-500 dark:text-neutral-400">
             {t('settings.ai.apiKeyStoredEncrypted')}
           </p>
@@ -598,10 +613,16 @@ const isCalendarConnection = (connection: ComposioConnection): boolean => {
 };
 
 function describeProvider(ref: ProviderRef, providers: CloudProvider[]): string {
-  if (ref.kind === 'openhuman') return 'Primary provider (auto)';
+  if (ref.kind === 'openhuman') return 'Default provider';
   if (ref.kind === 'local') return `Local ${ref.model}`;
   const provider = providers.find(p => p.slug === ref.providerSlug);
   return `${provider?.label ?? ref.providerSlug} ${ref.model || 'custom model'}`;
+}
+
+function modelForProvider(ref: ProviderRef, providerSlug: string): string | null {
+  return ref.kind === 'cloud' && ref.providerSlug === providerSlug && ref.model.trim()
+    ? ref.model.trim()
+    : null;
 }
 
 const LoopToggle = ({
@@ -1180,6 +1201,7 @@ const BackgroundLoopControls = ({
 type WorkloadRowProps = {
   workload: Workload;
   ref_: ProviderRef;
+  defaultRef?: ProviderRef;
   cloudProviders: CloudProvider[];
   localModels: OllamaModel[];
   ollamaState: OllamaState;
@@ -1189,6 +1211,7 @@ type WorkloadRowProps = {
 const WorkloadRow = ({
   workload,
   ref_,
+  defaultRef,
   cloudProviders,
   localModels,
   ollamaState,
@@ -1203,7 +1226,9 @@ const WorkloadRow = ({
 
   let resolved: string;
   if (ref_.kind === 'openhuman') {
-    resolved = 'Primary provider (auto)';
+    resolved = defaultRef
+      ? `Default · ${describeProvider(defaultRef, cloudProviders)}`
+      : 'Default provider';
   } else if (ref_.kind === 'cloud') {
     if (!selectedCloud) resolved = `${ref_.providerSlug} · ${ref_.model}`;
     else resolved = `${selectedCloud.label} · ${ref_.model}`;
@@ -1285,8 +1310,9 @@ const CustomRoutingDialog = ({
   onSubmit,
 }: CustomRoutingDialogProps) => {
   const { t } = useT();
-  // Non-openhuman cloud providers + local-ollama (if available) are the
-  // "Custom" options. OpenHuman is excluded — it's the Default path.
+  // Configured external providers + local-ollama (if available) are the
+  // "Custom" options. The legacy openhuman slug is excluded because Default
+  // now resolves through the user's configured provider/model.
   const customCloud = cloudProviders.filter(p => p.slug !== 'openhuman');
   const localAvailable = ollamaRunning && localModels.length > 0;
 
@@ -1318,7 +1344,7 @@ const CustomRoutingDialog = ({
   const selectedCloud =
     source?.kind === 'cloud' ? customCloud.find(c => c.slug === source.providerSlug) : undefined;
 
-  // Fetch available models whenever the selected cloud provider changes.
+  // Fetch available models whenever the selected external provider changes.
   const selectedSlug = source?.kind === 'cloud' ? source.providerSlug : null;
   useEffect(() => {
     if (!selectedSlug) {
@@ -1606,21 +1632,99 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   // Which workload's "Custom" dialog is currently open (null = closed).
   const [customDialogFor, setCustomDialogFor] = useState<WorkloadId | null>(null);
+  const [defaultDialogOpen, setDefaultDialogOpen] = useState(false);
   // Which provider slug's API-key dialog is currently open (null = closed).
   const [keyDialogFor, setKeyDialogFor] = useState<string | null>(null);
   // When the user toggles LM Studio / Ollama (local runtimes), we
   // need to remember which label to attach to the upserted provider so the
   // chip can find it again. Cleared when the dialog closes.
   const [pendingLocalLabel, setPendingLocalLabel] = useState<string | null>(null);
+  const [providerTests, setProviderTests] = useState<
+    Record<string, { phase: 'running' | 'success' | 'error'; message: string }>
+  >({});
 
   const updateRouting = (id: WorkloadId, next: ProviderRef) =>
     setDraft({ ...draft, routing: { ...draft.routing, [id]: next } });
+
+  const chatRows = useMemo(() => WORKLOADS.filter(w => w.group === 'chat'), []);
+  const bgRows = useMemo(() => WORKLOADS.filter(w => w.group === 'background'), []);
+
+  const modelForProviderTest = useCallback(
+    (providerSlug: string): string | null => {
+      const refs = [
+        draft.chatDefault,
+        ...chatRows.map(row => draft.routing[row.id]),
+        ...bgRows.map(row => draft.routing[row.id]),
+      ];
+      for (const ref of refs) {
+        const model = modelForProvider(ref, providerSlug);
+        if (model) return model;
+      }
+      return null;
+    },
+    [bgRows, chatRows, draft.chatDefault, draft.routing]
+  );
+
+  const runProviderTest = useCallback(
+    async (provider: CloudProvider) => {
+      const model = modelForProviderTest(provider.slug);
+      if (!model) {
+        setProviderTests(prev => ({
+          ...prev,
+          [provider.slug]: {
+            phase: 'error',
+            message: 'Choose a default model for this provider first.',
+          },
+        }));
+        return;
+      }
+
+      setProviderTests(prev => ({
+        ...prev,
+        [provider.slug]: { phase: 'running', message: `Testing ${model}...` },
+      }));
+      try {
+        await flushCloudProviders(
+          draft.cloudProviders.map(p => ({
+            id: p.id,
+            slug: p.slug,
+            label: p.label,
+            endpoint: p.endpoint,
+            auth_style: p.authStyle,
+          }))
+        );
+        const result = await testCloudProvider(provider.slug, model);
+        setProviderTests(prev => ({
+          ...prev,
+          [provider.slug]: {
+            phase: 'success',
+            message: `OK ${result.model} in ${result.latency_ms}ms`,
+          },
+        }));
+      } catch (err) {
+        setProviderTests(prev => ({
+          ...prev,
+          [provider.slug]: {
+            phase: 'error',
+            message: err instanceof Error ? err.message : String(err),
+          },
+        }));
+      }
+    },
+    [draft.cloudProviders, modelForProviderTest]
+  );
 
   // applyPreset removed alongside the Cloud / Local / Mixed preset pills —
   // the new Default/Custom binary toggle handles routing per workload.
 
   const diffSummary = useMemo(() => {
     const out: string[] = [];
+    if (JSON.stringify(saved.cloudProviders) !== JSON.stringify(draft.cloudProviders)) {
+      out.push('Providers updated');
+    }
+    if (JSON.stringify(saved.chatDefault) !== JSON.stringify(draft.chatDefault)) {
+      out.push(`Chat default → ${describeProvider(draft.chatDefault, draft.cloudProviders)}`);
+    }
     for (const w of WORKLOADS) {
       const a = saved.routing[w.id];
       const b = draft.routing[w.id];
@@ -1637,9 +1741,6 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
     return out;
   }, [saved, draft]);
 
-  const chatRows = WORKLOADS.filter(w => w.group === 'chat');
-  const bgRows = WORKLOADS.filter(w => w.group === 'background');
-
   return (
     <div className="relative">
       {!embedded && (
@@ -1653,7 +1754,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
 
       <div className={embedded ? 'space-y-6' : 'space-y-6 p-4'}>
         {/* ═══════════════════════════════════════════════════════════════
-            AUTH — provider authentication (cloud providers + local Ollama
+            AUTH — provider authentication (external providers + local Ollama
             setup). Everything the user needs to wire a model up.
             ═══════════════════════════════════════════════════════════════ */}
         <div className="space-y-4">
@@ -1680,44 +1781,80 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
             )}
 
             <div className="flex flex-wrap gap-2">
-              {/* Built-in cloud providers — openai/anthropic/openrouter/custom */}
+              {/* Built-in external providers — openai/anthropic/openrouter/custom */}
               {(['openai', 'anthropic', 'openrouter', 'custom'] as const).map(slug => {
                 const meta = BUILTIN_PROVIDER_META[slug];
                 const label = meta?.label ?? slug;
                 const existing = draft.cloudProviders.find(cp => cp.slug === slug);
                 const enabled = !!existing;
+                const testState = providerTests[slug];
                 return (
-                  <ProviderToggleChip
-                    key={slug}
-                    slug={slug}
-                    label={label}
-                    enabled={enabled}
-                    busy={busyAction === `toggle-${slug}`}
-                    onToggle={() => {
-                      if (enabled && existing) {
-                        // Toggle OFF: remove the provider + scrub any
-                        // routing entries that pin to it.
-                        const remaining = draft.cloudProviders.filter(cp => cp.id !== existing.id);
-                        const nextRouting = Object.fromEntries(
-                          Object.entries(draft.routing).map(([wid, ref]) => [
-                            wid,
-                            ref.kind === 'cloud' && ref.providerSlug === existing.slug
+                  <div key={slug} className="inline-flex items-center gap-1.5">
+                    <ProviderToggleChip
+                      slug={slug}
+                      label={label}
+                      enabled={enabled}
+                      busy={busyAction === `toggle-${slug}`}
+                      onToggle={() => {
+                        if (enabled && existing) {
+                          // Toggle OFF: remove the provider + scrub any
+                          // routing entries that pin to it.
+                          const remaining = draft.cloudProviders.filter(
+                            cp => cp.id !== existing.id
+                          );
+                          const nextRouting = Object.fromEntries(
+                            Object.entries(draft.routing).map(([wid, ref]) => [
+                              wid,
+                              ref.kind === 'cloud' && ref.providerSlug === existing.slug
+                                ? ({ kind: 'openhuman' } as const)
+                                : ref,
+                            ])
+                          ) as typeof draft.routing;
+                          const chatDefault =
+                            draft.chatDefault.kind === 'cloud' &&
+                            draft.chatDefault.providerSlug === existing.slug
                               ? ({ kind: 'openhuman' } as const)
-                              : ref,
-                          ])
-                        ) as typeof draft.routing;
-                        setDraft({ ...draft, cloudProviders: remaining, routing: nextRouting });
-                      } else if (slug === 'custom') {
-                        // Custom providers need slug + endpoint + label, not
-                        // just an API key — defer to the full editor modal.
-                        setEditing('new');
-                      } else {
-                        // Toggle ON: open the API-key popup. The chip
-                        // only flips after the dialog saves.
-                        setKeyDialogFor(slug);
-                      }
-                    }}
-                  />
+                              : draft.chatDefault;
+                          setDraft({
+                            ...draft,
+                            cloudProviders: remaining,
+                            chatDefault,
+                            routing: nextRouting,
+                          });
+                        } else if (slug === 'custom') {
+                          // Custom providers need slug + endpoint + label, not
+                          // just an API key — defer to the full editor modal.
+                          setEditing('new');
+                        } else {
+                          // Toggle ON: open the API-key popup. The chip
+                          // only flips after the dialog saves.
+                          setKeyDialogFor(slug);
+                        }
+                      }}
+                    />
+                    {enabled && existing ? (
+                      <button
+                        type="button"
+                        onClick={() => void runProviderTest(existing)}
+                        disabled={testState?.phase === 'running'}
+                        className="rounded-full border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 disabled:cursor-wait disabled:opacity-60">
+                        {testState?.phase === 'running' ? 'Testing' : 'Test'}
+                      </button>
+                    ) : null}
+                    {testState ? (
+                      <span
+                        className={`max-w-[220px] truncate text-[11px] ${
+                          testState.phase === 'success'
+                            ? 'text-emerald-700 dark:text-emerald-300'
+                            : testState.phase === 'error'
+                              ? 'text-red-600 dark:text-red-300'
+                              : 'text-stone-500 dark:text-neutral-400'
+                        }`}
+                        title={testState.message}>
+                        {testState.message}
+                      </span>
+                    ) : null}
+                  </div>
                 );
               })}
 
@@ -1754,7 +1891,17 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                                 : ref,
                             ])
                           ) as typeof draft.routing;
-                          setDraft({ ...draft, cloudProviders: remaining, routing: nextRouting });
+                          const chatDefault =
+                            draft.chatDefault.kind === 'cloud' &&
+                            draft.chatDefault.providerSlug === localKind
+                              ? ({ kind: 'openhuman' } as const)
+                              : draft.chatDefault;
+                          setDraft({
+                            ...draft,
+                            cloudProviders: remaining,
+                            chatDefault,
+                            routing: nextRouting,
+                          });
                         } else {
                           setKeyDialogFor(localKind);
                           setPendingLocalLabel(label);
@@ -1776,7 +1923,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
 
         {/* ═══════════════════════════════════════════════════════════════
             ROUTING — which workload uses which model. Each row is a
-            binary toggle: Default (let OpenHuman pick) or Custom (opens
+            binary toggle: Default (use the configured default model) or Custom (opens
             a popup to choose provider + model).
             ═══════════════════════════════════════════════════════════════ */}
         <div className="space-y-4">
@@ -1792,8 +1939,21 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
           <section className="space-y-3">
             <div className="overflow-hidden rounded-lg border border-stone-200 dark:border-neutral-800 bg-stone-50 dark:bg-neutral-800/60 px-3">
               <div className="pt-3">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 dark:text-neutral-500">
-                  {t('settings.ai.workloadGroupChat')}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-wide text-stone-400 dark:text-neutral-500">
+                    {t('settings.ai.workloadGroupChat')}
+                  </div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="max-w-[260px] truncate font-mono text-[11px] text-stone-500 dark:text-neutral-400">
+                      Default: {describeProvider(draft.chatDefault, draft.cloudProviders)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setDefaultDialogOpen(true)}
+                      className="rounded-md border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-2 py-1 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60">
+                      Set default
+                    </button>
+                  </div>
                 </div>
                 <div className="divide-y divide-stone-200 dark:divide-neutral-800">
                   {chatRows.map(w => (
@@ -1801,6 +1961,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                       key={w.id}
                       workload={w}
                       ref_={draft.routing[w.id]}
+                      defaultRef={draft.chatDefault}
                       cloudProviders={draft.cloudProviders}
                       localModels={installed}
                       ollamaState={ollama.state}
@@ -1834,7 +1995,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
             <div className="text-[11px] text-stone-500 dark:text-neutral-400">
               {t('settings.ai.defaultResolvesTo')}{' '}
               <span className="font-mono text-stone-700 dark:text-neutral-200">
-                first configured provider
+                {describeProvider(draft.chatDefault, draft.cloudProviders)}
               </span>
               .
             </div>
@@ -1903,6 +2064,30 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
               const msg = err instanceof Error ? err.message : String(err);
               console.warn('[ai-settings] clearCloudProviderKey failed', msg);
             }
+          }}
+        />
+      )}
+
+      {defaultDialogOpen && (
+        <CustomRoutingDialog
+          workload={{
+            id: 'chat',
+            group: 'chat',
+            label: 'Chat and conversations default',
+            description: 'Default model for chat paths',
+          }}
+          initial={draft.chatDefault}
+          cloudProviders={draft.cloudProviders}
+          localModels={installed}
+          ollamaRunning={ollama.state === 'running'}
+          onClose={() => setDefaultDialogOpen(false)}
+          onSubmit={next => {
+            const routing = { ...draft.routing };
+            for (const row of chatRows) {
+              routing[row.id] = { kind: 'openhuman' };
+            }
+            setDraft({ ...draft, chatDefault: next, routing });
+            setDefaultDialogOpen(false);
           }}
         />
       )}

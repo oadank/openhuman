@@ -39,10 +39,10 @@ use std::sync::OnceLock;
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt as _;
 
-use axum::Json;
-use axum::http::{Method, StatusCode, header};
+use axum::http::{header, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use serde_json::json;
 
 static RPC_TOKEN: OnceLock<String> = OnceLock::new();

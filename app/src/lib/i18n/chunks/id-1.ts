@@ -63,7 +63,7 @@ const id1: TranslationMap = {
   'settings.aiModels': 'AI & Model',
   'settings.aiModelsDesc': 'Pengaturan model AI lokal, unduhan, dan penyedia LLM',
   'settings.ai': 'AI',
-  'settings.aiDesc': 'Penyedia cloud, model Ollama lokal, dan routing per beban kerja',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'Ulangi Tur',
   'settings.restartTourDesc': 'Putar ulang panduan produk dari awal',
   'settings.about': 'Tentang',

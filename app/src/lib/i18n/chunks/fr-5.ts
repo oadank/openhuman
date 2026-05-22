@@ -388,6 +388,7 @@ const fr5: TranslationMap = {
   'composio.reconnect': 'Reconnecter',
   'composio.directModeRequiresKey':
     "Échec de l'enregistrement. Le mode Direct nécessite une clé API non vide.",
+  'composio.triggersTitle': 'Déclencheurs Composio',
   'composio.notYetRouted': 'pas encore routé',
   'composio.triggers.loading': 'Chargement…',
   'conversations.taskKanban.todo': 'À faire',

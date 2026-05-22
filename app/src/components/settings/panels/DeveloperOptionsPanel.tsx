@@ -20,7 +20,7 @@ const developerItems = [
   {
     id: 'ai',
     title: 'AI Configuration',
-    description: 'Cloud providers, local Ollama models, and per-workload routing',
+    description: 'External providers, local Ollama models, and per-workload routing',
     route: 'ai',
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

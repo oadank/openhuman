@@ -4,8 +4,8 @@
  * Sits between the panel's React state and the Rust JSON-RPC core. Three
  * orthogonal surfaces in one place:
  *
- *  1. Cloud providers + per-workload routing → `openhuman.inference_update_model_settings`
- *  2. API keys for cloud providers           → `openhuman.auth_*_provider_credentials`
+ *  1. External providers + workload routing → `openhuman.inference_update_model_settings`
+ *  2. API keys for external providers       → `openhuman.auth_*_provider_credentials`
  *                                              (encrypted at rest in
  *                                              `auth-profiles.json`)
  *  3. Local provider (Ollama) status + models → existing `localAi.ts` exports
@@ -72,7 +72,7 @@ export type ProviderRef =
   | { kind: 'local'; model: string };
 
 /**
- * Cloud provider entry as the UI sees it — endpoint config plus a derived
+ * External provider entry as the UI sees it — endpoint config plus a derived
  * `has_api_key` flag (true when a key is stored in `auth-profiles.json`).
  */
 export interface CloudProviderView extends CloudProviderCreds {
@@ -89,6 +89,7 @@ export interface ModelInfo {
 /** Single in-memory snapshot the AI panel renders against. */
 export interface AISettings {
   cloudProviders: CloudProviderView[];
+  chatDefault: ProviderRef;
   routing: Record<WorkloadId, ProviderRef>;
 }
 
@@ -96,11 +97,11 @@ export interface AISettings {
 
 /**
  * Parse a stored provider string (e.g. `"openai:gpt-4o"`) into a structured
- * ProviderRef. Empty/null/`"cloud"` → openhuman. Mirrors the Rust factory grammar.
+ * ProviderRef. Empty/null/legacy sentinels → default route. Mirrors the Rust factory grammar.
  *
  * New grammar: `"<slug>:<model>"`. Legacy bare sentinels:
- *   - `"openhuman"` → { kind: 'openhuman' }
- *   - `"cloud"` or empty → { kind: 'openhuman' }
+ *   - `"openhuman"` → { kind: 'openhuman' } legacy default sentinel
+ *   - `"cloud"` or empty → { kind: 'openhuman' } legacy/default sentinel
  *   - `"ollama:<model>"` → { kind: 'local', model }
  *   - `"<slug>:<model>"` → { kind: 'cloud', providerSlug: slug, model }
  */
@@ -121,8 +122,28 @@ export function parseProviderString(s: string | null | undefined): ProviderRef {
     }
     return { kind: 'cloud', providerSlug: slug, model };
   }
-  // Unrecognised bare string → fall back to openhuman.
+  // Unrecognised bare string → fall back to the default route.
   return { kind: 'openhuman' };
+}
+
+function parseDefaultModelString(
+  s: string | null | undefined,
+  cloudProviders: CloudProviderView[]
+): ProviderRef {
+  const parsed = parseProviderString(s);
+  const trimmed = (s ?? '').trim();
+  if (
+    parsed.kind === 'cloud' &&
+    !cloudProviders.some(provider => provider.slug === parsed.providerSlug)
+  ) {
+    return { kind: 'openhuman' };
+  }
+  if (parsed.kind !== 'openhuman' || !trimmed || trimmed === 'cloud' || trimmed === 'openhuman') {
+    return parsed;
+  }
+  const provider = cloudProviders[0];
+  if (!provider) return parsed;
+  return { kind: 'cloud', providerSlug: provider.slug, model: trimmed };
 }
 
 /** Serialise a `ProviderRef` back to the wire-format string. */
@@ -150,7 +171,7 @@ function authKeyForSlug(slug: string): string {
 /**
  * Loads the full AI settings view by joining:
  *  - the core's client-config snapshot (cloud_providers + *_provider fields)
- *  - the auth profiles list (to derive `has_api_key` per cloud provider)
+ *  - the auth profiles list (to derive `has_api_key` per external provider)
  *
  * Defensive: a failed `auth_list` (e.g. brand-new workspace, no profiles
  * file yet) silently degrades to `has_api_key: false` for all entries so
@@ -187,7 +208,11 @@ export async function loadAISettings(): Promise<AISettings> {
     subconscious: parseProviderString(config.subconscious_provider),
   };
 
-  return { cloudProviders, routing };
+  return {
+    cloudProviders,
+    chatDefault: parseDefaultModelString(config.default_model, cloudProviders),
+    routing,
+  };
 }
 
 // ─── Write path: diff + save ───────────────────────────────────────────────
@@ -200,7 +225,7 @@ export async function loadAISettings(): Promise<AISettings> {
 export async function saveAISettings(prev: AISettings, next: AISettings): Promise<void> {
   const patch: ModelSettingsUpdate = {};
 
-  // Cloud providers: any change → send the full list.
+  // External providers: any change → send the full list.
   if (
     prev.cloudProviders.length !== next.cloudProviders.length ||
     prev.cloudProviders.some((p, i) => {
@@ -220,6 +245,12 @@ export async function saveAISettings(prev: AISettings, next: AISettings): Promis
     );
   }
 
+  const prevDefault = serializeProviderRef(prev.chatDefault);
+  const nextDefault = serializeProviderRef(next.chatDefault);
+  if (prevDefault !== nextDefault) {
+    patch.default_model = nextDefault;
+  }
+
   for (const w of ALL_WORKLOADS) {
     const a = serializeProviderRef(prev.routing[w]);
     const b = serializeProviderRef(next.routing[w]);
@@ -234,15 +265,15 @@ export async function saveAISettings(prev: AISettings, next: AISettings): Promis
   await openhumanUpdateModelSettings(patch);
 }
 
-// ─── API key management (per cloud provider slug) ──────────────────────────
+// ─── API key management (per external provider slug) ───────────────────────
 
 /**
- * Store an API key for a cloud provider (encrypted at rest). Keyed by slug
+ * Store an API key for an external provider (encrypted at rest). Keyed by slug
  * using the new `provider:<slug>` format.
  */
 export async function setCloudProviderKey(slug: string, apiKey: string): Promise<void> {
   if (slug === 'openhuman') {
-    throw new Error('OpenHuman uses the session JWT — keys are not configurable here.');
+    throw new Error('The openhuman slug is reserved and cannot store an external API key.');
   }
   // Store under both new-style key `provider:<slug>` and legacy bare `<slug>`
   // so old code paths that look up by bare slug continue to work.
@@ -278,7 +309,7 @@ export async function flushCloudProviders(providers: CloudProviderCreds[]): Prom
 }
 
 /**
- * Fetch the model list from a configured cloud provider's /models API.
+ * Fetch the model list from a configured external provider's /models API.
  * `providerId` may be either the provider's opaque id or its slug — Rust
  * accepts both. Prefer passing the slug so lookup works before the provider
  * config has been persisted to disk (i.e. before the user clicks Save).
@@ -294,6 +325,29 @@ export async function listProviderModels(providerId: string): Promise<ModelInfo[
     params: { provider_id: providerId },
   });
   return res?.result?.models ?? [];
+}
+
+export interface ProviderTestResult {
+  ok: boolean;
+  provider_id: string;
+  provider_slug: string;
+  model: string;
+  latency_ms: number;
+  response_preview: string;
+}
+
+export async function testCloudProvider(
+  providerId: string,
+  model: string
+): Promise<ProviderTestResult> {
+  if (!isTauri()) {
+    throw new Error('Provider tests require the desktop app runtime.');
+  }
+  const res = await callCoreRpc<{ result: ProviderTestResult }>({
+    method: 'openhuman.inference_test_provider',
+    params: { provider_id: providerId, model },
+  });
+  return res.result;
 }
 
 // ─── Local provider façade (Ollama install / detect / model manage) ───────
@@ -323,8 +377,8 @@ export async function loadLocalProviderSnapshot(): Promise<LocalProviderSnapshot
 /**
  * Toggle the master local-AI runtime (Ollama daemon orchestration). When
  * `false`, every workload routed to `ollama:*` will fail to build at the
- * factory level — the user should leave routes set to "openhuman" while local
- * AI is disabled. The new AI panel surfaces this as a single switch.
+ * factory level — the user should leave routes set to Default while local AI
+ * is disabled. The new AI panel surfaces this as a single switch.
  *
  * Critically: this flips BOTH `runtime_enabled` AND `opt_in_confirmed`.
  */

@@ -27,7 +27,7 @@ export type AuthStyle = 'bearer' | 'anthropic' | 'none';
 export type CloudProviderType = 'openhuman' | 'openai' | 'anthropic' | 'openrouter' | 'custom';
 
 /**
- * Endpoint config for one cloud LLM provider (new slug-keyed shape).
+ * Endpoint config for one external LLM provider (new slug-keyed shape).
  * API keys are NOT carried here — they live in `auth-profiles.json`
  * (set/cleared through the `auth_*` RPCs, keyed by `provider:<slug>`).
  */
@@ -131,7 +131,7 @@ export interface LocalAiSettingsUpdate {
    * this is `false`, regardless of `runtime_enabled`. The unified AI panel
    * toggle flips this in tandem with `runtime_enabled` so a single click
    * actually turns local AI on — without it, the daemon spawns but
-   * bootstrap immediately forces status back to disabled (cloud fallback).
+   * bootstrap immediately forces status back to disabled (external-provider fallback).
    */
   opt_in_confirmed?: boolean | null;
   provider?: string | null;
@@ -198,11 +198,11 @@ export interface ClientConfig {
   api_key_set: boolean;
   /** Legacy per-task-hint model overrides (deprecated; will be removed). */
   model_routes: ModelRoute[];
-  /** Configured cloud providers (no API keys — those live in auth-profiles.json). */
+  /** Configured external providers (no API keys — those live in auth-profiles.json). */
   cloud_providers: CloudProviderCreds[];
-  /** Id of the `cloud_providers` entry resolved by the `"cloud"` sentinel. */
+  /** Legacy primary-provider id. New chat defaults use `default_model`. */
   primary_cloud: string | null;
-  /** Per-workload provider strings (e.g. `"cloud"`, `"ollama:llama3.1:8b"`, `"openai:gpt-4o"`). */
+  /** Per-workload provider strings (e.g. `"ollama:llama3.1:8b"`, `"openai:gpt-4o"`). */
   chat_provider: string | null;
   reasoning_provider: string | null;
   agentic_provider: string | null;

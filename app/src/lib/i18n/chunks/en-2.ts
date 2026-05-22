@@ -199,7 +199,7 @@ const en2: TranslationMap = {
   'localModel.downloadModels': 'Download Models',
   'localModel.usage': 'Usage',
   'localModel.usageDesc':
-    'Choose which subsystems run on the local model. Anything off uses the cloud.',
+    'Choose which subsystems run on the local model. Anything off uses your external provider.',
   'localModel.enableRuntime': 'Enable local AI runtime',
   'localModel.enableRuntimeDesc':
     'Master switch. Off by default — Ollama stays idle. When on, the tree summarizer, screen intelligence, and autocomplete always use the local model.',

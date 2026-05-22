@@ -6,9 +6,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    HttpHealthProbe, build_http_health_payload, build_http_schema_dump, default_state,
-    invoke_method, is_param_validation_error, params_to_object, parse_json_params, rpc_handler,
-    type_name,
+    build_http_health_payload, build_http_schema_dump, default_state, invoke_method,
+    is_param_validation_error, params_to_object, parse_json_params, rpc_handler, type_name,
+    HttpHealthProbe,
 };
 
 struct EnvVarGuard {
@@ -361,11 +361,9 @@ fn params_to_object_rejects_array() {
 #[test]
 fn params_to_object_rejects_scalars() {
     assert!(params_to_object(json!(42)).unwrap_err().contains("number"));
-    assert!(
-        params_to_object(json!("hi"))
-            .unwrap_err()
-            .contains("string")
-    );
+    assert!(params_to_object(json!("hi"))
+        .unwrap_err()
+        .contains("string"));
     assert!(params_to_object(json!(true)).unwrap_err().contains("bool"));
 }
 
@@ -434,9 +432,9 @@ async fn structured_rpc_error_envelope_passes_through_generic_dispatch() {
     // this is what makes the boundary domain-agnostic. We register a
     // throwaway method-name on a thread-scoped op and confirm the
     // wire-shape carries the `kind`/`thread_id` data verbatim.
-    use axum::Json;
     use axum::body::to_bytes;
     use axum::extract::State;
+    use axum::Json;
 
     let workspace = tempfile::tempdir().expect("workspace tempdir");
     let _env = EnvVarGuard::set_many(vec![(
@@ -469,9 +467,9 @@ async fn structured_rpc_error_envelope_passes_through_generic_dispatch() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn thread_not_found_rpc_error_does_not_report_to_sentry() {
-    use axum::Json;
     use axum::body::to_bytes;
     use axum::extract::State;
+    use axum::Json;
     use sentry::test::TestTransport;
     use tracing::Level;
     use tracing_subscriber::layer::SubscriberExt;

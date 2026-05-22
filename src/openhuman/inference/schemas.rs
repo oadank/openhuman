@@ -117,6 +117,12 @@ struct InferenceListModelsParams {
 }
 
 #[derive(Debug, Deserialize)]
+struct InferenceTestProviderParams {
+    provider_id: String,
+    model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct InferenceApplyPresetParams {
     tier: String,
 }
@@ -128,6 +134,7 @@ pub fn all_controller_schemas() -> Vec<ControllerSchema> {
         schemas("update_model_settings"),
         schemas("update_local_settings"),
         schemas("list_models"),
+        schemas("test_provider"),
         schemas("device_profile"),
         schemas("presets"),
         schemas("apply_preset"),
@@ -163,6 +170,10 @@ pub fn all_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: schemas("list_models"),
             handler: handle_inference_list_models,
+        },
+        RegisteredController {
+            schema: schemas("test_provider"),
+            handler: handle_inference_test_provider,
         },
         RegisteredController {
             schema: schemas("device_profile"),
@@ -225,30 +236,72 @@ pub fn schemas(function: &str) -> ControllerSchema {
             function: "get_client_config",
             description: "Read the client-facing inference/provider config used by the AI settings UI.",
             inputs: vec![],
-            outputs: vec![json_output("config", "Client-facing inference config payload.")],
+            outputs: vec![json_output(
+                "config",
+                "Client-facing inference config payload.",
+            )],
         },
         "update_model_settings" => ControllerSchema {
             namespace: "inference",
             function: "update_model_settings",
-            description: "Persist cloud-provider routing, custom inference endpoint, and per-workload provider settings.",
+            description: "Persist external-provider routing, custom inference endpoint, and per-workload provider settings.",
             inputs: vec![
                 optional_string("api_url", "Optional OpenHuman product backend URL."),
                 optional_string("inference_url", "Optional custom inference base URL."),
-                optional_string("api_key", "Optional API key for a custom inference endpoint."),
-                optional_string("default_model", "Optional default model override."),
-                optional_f64("default_temperature", "Optional default temperature override."),
-                optional_json("model_routes", "Optional full replacement for legacy model routes."),
-                optional_json("cloud_providers", "Optional full replacement for configured cloud providers."),
-                optional_string("primary_cloud", "Optional primary cloud provider id."),
+                optional_string(
+                    "api_key",
+                    "Optional API key for a custom inference endpoint.",
+                ),
+                optional_string(
+                    "default_model",
+                    "Optional default chat model provider string. Empty string clears.",
+                ),
+                optional_f64(
+                    "default_temperature",
+                    "Optional default temperature override.",
+                ),
+                optional_json(
+                    "model_routes",
+                    "Optional full replacement for legacy model routes.",
+                ),
+                optional_json(
+                    "cloud_providers",
+                    "Optional full replacement for configured external providers.",
+                ),
+                optional_string("primary_cloud", "Legacy primary external provider id."),
                 optional_string("chat_provider", "Optional chat workload provider string."),
-                optional_string("reasoning_provider", "Optional reasoning workload provider string."),
-                optional_string("agentic_provider", "Optional agentic workload provider string."),
-                optional_string("coding_provider", "Optional coding workload provider string."),
-                optional_string("memory_provider", "Optional memory workload provider string."),
-                optional_string("embeddings_provider", "Optional embeddings workload provider string."),
-                optional_string("heartbeat_provider", "Optional heartbeat workload provider string."),
-                optional_string("learning_provider", "Optional learning workload provider string."),
-                optional_string("subconscious_provider", "Optional subconscious workload provider string."),
+                optional_string(
+                    "reasoning_provider",
+                    "Optional reasoning workload provider string.",
+                ),
+                optional_string(
+                    "agentic_provider",
+                    "Optional agentic workload provider string.",
+                ),
+                optional_string(
+                    "coding_provider",
+                    "Optional coding workload provider string.",
+                ),
+                optional_string(
+                    "memory_provider",
+                    "Optional memory workload provider string.",
+                ),
+                optional_string(
+                    "embeddings_provider",
+                    "Optional embeddings workload provider string.",
+                ),
+                optional_string(
+                    "heartbeat_provider",
+                    "Optional heartbeat workload provider string.",
+                ),
+                optional_string(
+                    "learning_provider",
+                    "Optional learning workload provider string.",
+                ),
+                optional_string(
+                    "subconscious_provider",
+                    "Optional subconscious workload provider string.",
+                ),
             ],
             outputs: vec![json_output("snapshot", "Updated config snapshot.")],
         },
@@ -257,16 +310,37 @@ pub fn schemas(function: &str) -> ControllerSchema {
             function: "update_local_settings",
             description: "Persist local inference provider selection, endpoint URL, and local-runtime routing flags.",
             inputs: vec![
-                optional_bool("runtime_enabled", "Enable or disable local inference runtime routing."),
-                optional_bool("opt_in_confirmed", "Persist the local inference opt-in flag."),
-                optional_string("provider", "Optional local provider slug, e.g. ollama or lm_studio."),
+                optional_bool(
+                    "runtime_enabled",
+                    "Enable or disable local inference runtime routing.",
+                ),
+                optional_bool(
+                    "opt_in_confirmed",
+                    "Persist the local inference opt-in flag.",
+                ),
+                optional_string(
+                    "provider",
+                    "Optional local provider slug, e.g. ollama or lm_studio.",
+                ),
                 optional_string("base_url", "Optional local provider base URL."),
                 optional_string("model_id", "Optional generic model id override."),
                 optional_string("chat_model_id", "Optional chat model id override."),
-                optional_bool("usage_embeddings", "Whether embeddings workload may use the local provider."),
-                optional_bool("usage_heartbeat", "Whether heartbeat workload may use the local provider."),
-                optional_bool("usage_learning_reflection", "Whether learning reflection workload may use the local provider."),
-                optional_bool("usage_subconscious", "Whether subconscious workload may use the local provider."),
+                optional_bool(
+                    "usage_embeddings",
+                    "Whether embeddings workload may use the local provider.",
+                ),
+                optional_bool(
+                    "usage_heartbeat",
+                    "Whether heartbeat workload may use the local provider.",
+                ),
+                optional_bool(
+                    "usage_learning_reflection",
+                    "Whether learning reflection workload may use the local provider.",
+                ),
+                optional_bool(
+                    "usage_subconscious",
+                    "Whether subconscious workload may use the local provider.",
+                ),
             ],
             outputs: vec![json_output("snapshot", "Updated config snapshot.")],
         },
@@ -274,8 +348,24 @@ pub fn schemas(function: &str) -> ControllerSchema {
             namespace: "inference",
             function: "list_models",
             description: "Fetch the available model list from a configured inference provider's /models API.",
-            inputs: vec![required_string("provider_id", "Opaque id of the cloud provider entry to query.")],
+            inputs: vec![required_string(
+                "provider_id",
+                "Opaque id or slug of the external provider entry to query.",
+            )],
             outputs: vec![json_output("models", "Provider model list payload.")],
+        },
+        "test_provider" => ControllerSchema {
+            namespace: "inference",
+            function: "test_provider",
+            description: "Validate a configured external inference provider by performing a real chat completion request.",
+            inputs: vec![
+                required_string(
+                    "provider_id",
+                    "Opaque id or slug of the provider entry to test.",
+                ),
+                optional_string("model", "Model id to use for the test chat completion."),
+            ],
+            outputs: vec![json_output("result", "Provider test result payload.")],
         },
         "device_profile" => ControllerSchema {
             namespace: "inference",
@@ -295,7 +385,10 @@ pub fn schemas(function: &str) -> ControllerSchema {
             namespace: "inference",
             function: "apply_preset",
             description: "Apply a local inference preset to the persisted config.",
-            inputs: vec![required_string("tier", "Tier to apply: ram_2_4gb or disabled.")],
+            inputs: vec![required_string(
+                "tier",
+                "Tier to apply: ram_2_4gb or disabled.",
+            )],
             outputs: vec![json_output("result", "Applied preset payload.")],
         },
         "diagnostics" => ControllerSchema {
@@ -375,15 +468,24 @@ pub fn schemas(function: &str) -> ControllerSchema {
             description: "Ask the inference provider whether the assistant should add an emoji reaction to a user message, based on channel type.",
             inputs: vec![
                 required_string("message", "User message content to evaluate."),
-                required_string("channel_type", "Channel type: web, telegram, discord, slack, etc."),
+                required_string(
+                    "channel_type",
+                    "Channel type: web, telegram, discord, slack, etc.",
+                ),
             ],
-            outputs: vec![json_output("decision", "Reaction decision: {should_react, emoji}.")],
+            outputs: vec![json_output(
+                "decision",
+                "Reaction decision: {should_react, emoji}.",
+            )],
         },
         "analyze_sentiment" => ControllerSchema {
             namespace: "inference",
             function: "analyze_sentiment",
             description: "Classify the emotion and valence of a user message with the inference provider.",
-            inputs: vec![required_string("message", "User message content to classify.")],
+            inputs: vec![required_string(
+                "message",
+                "User message content to classify.",
+            )],
             outputs: vec![json_output("sentiment", "Sentiment analysis payload.")],
         },
         other => panic!("unknown inference schema: {other}"),
@@ -495,7 +597,7 @@ fn handle_inference_update_model_settings(params: Map<String, Value>) -> Control
                         .map(|entry| {
                             let slug = entry.slug.trim().to_string();
                             if slug.is_empty() {
-                                return Err("cloud provider slug must not be empty".to_string());
+                                return Err("external provider slug must not be empty".to_string());
                             }
                             if is_slug_reserved(&slug) {
                                 return Err(format!(
@@ -582,6 +684,19 @@ fn handle_inference_list_models(params: Map<String, Value>) -> ControllerFuture 
         let request = deserialize_params::<InferenceListModelsParams>(params)?;
         to_json(
             crate::openhuman::inference::rpc::inference_list_models(&request.provider_id).await?,
+        )
+    })
+}
+
+fn handle_inference_test_provider(params: Map<String, Value>) -> ControllerFuture {
+    Box::pin(async move {
+        let request = deserialize_params::<InferenceTestProviderParams>(params)?;
+        to_json(
+            crate::openhuman::inference::rpc::inference_test_provider(
+                &request.provider_id,
+                request.model.as_deref(),
+            )
+            .await?,
         )
     })
 }

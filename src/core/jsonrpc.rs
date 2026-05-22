@@ -10,14 +10,14 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use axum::extract::{Query, State, WebSocketUpgrade};
-use axum::http::{HeaderValue, Method, StatusCode, header};
+use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::{Json, Router, extract::Request};
+use axum::{extract::Request, Json, Router};
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 

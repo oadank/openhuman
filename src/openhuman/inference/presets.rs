@@ -32,18 +32,18 @@ pub enum ModelTier {
 pub const MVP_MAX_TIER: ModelTier = ModelTier::Ram2To4Gb;
 
 /// Minimum host RAM (in whole GB) below which the **default** is to skip
-/// local inference and use the cloud summarizer instead.  The user can still
+/// local inference and use the configured external provider instead.  The user can still
 /// override this and opt into local AI via settings.
 pub const MIN_RAM_GB_FOR_LOCAL_AI: u64 = 8;
 
 /// Returns `true` when the device has enough RAM that local AI should be
-/// enabled by default. Below the floor we recommend cloud fallback instead.
+/// enabled by default. Below the floor we recommend external-provider fallback instead.
 pub fn device_supports_local_ai(device: &DeviceProfile) -> bool {
     device.total_ram_gb() >= MIN_RAM_GB_FOR_LOCAL_AI
 }
 
 /// Returns `true` when the device is below the RAM floor and local AI should
-/// default to disabled (cloud fallback). This is a **recommendation**, not a
+/// default to disabled (external-provider fallback). This is a **recommendation**, not a
 /// hard gate — the user can still opt in.
 pub fn should_default_to_cloud_fallback(device: &DeviceProfile) -> bool {
     !device_supports_local_ai(device)
@@ -124,8 +124,7 @@ pub fn all_presets() -> Vec<ModelPreset> {
         ModelPreset {
             tier: ModelTier::Ram2To4Gb,
             label: "Gemma 3 1B",
-            description:
-                "Battery-friendly local summarization preset. Uses the 1B Gemma model with vision disabled.",
+            description: "Battery-friendly local summarization preset. Uses the 1B Gemma model with vision disabled.",
             chat_model_id: "gemma3:1b-it-qat",
             vision_model_id: "",
             // bge-m3 — 1024 dims required by memory tree's on-disk format

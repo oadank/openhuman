@@ -45,6 +45,7 @@ pub struct ReflectionHook {
     full_config: Arc<Config>,
     memory: Arc<dyn Memory>,
     provider: Option<Arc<dyn crate::openhuman::inference::provider::Provider>>,
+    provider_model: Option<String>,
     /// Per-session reflection counts for throttling. Key is session_id (or "__global__").
     session_counts: Mutex<HashMap<String, usize>>,
 }
@@ -56,11 +57,22 @@ impl ReflectionHook {
         memory: Arc<dyn Memory>,
         provider: Option<Arc<dyn crate::openhuman::inference::provider::Provider>>,
     ) -> Self {
+        Self::new_with_model(config, full_config, memory, provider, None)
+    }
+
+    pub fn new_with_model(
+        config: LearningConfig,
+        full_config: Arc<Config>,
+        memory: Arc<dyn Memory>,
+        provider: Option<Arc<dyn crate::openhuman::inference::provider::Provider>>,
+        provider_model: Option<String>,
+    ) -> Self {
         Self {
             config,
             full_config,
             memory,
             provider,
+            provider_model,
             session_counts: Mutex::new(HashMap::new()),
         }
     }
@@ -158,30 +170,30 @@ impl ReflectionHook {
         match self.config.reflection_source {
             ReflectionSource::Local => {
                 // Gate: local reflection requires the per-feature flag.
-                // When off, fall back to a cloud provider if one is configured;
+                // When off, fall back to an external provider if one is configured;
                 // otherwise no-op silently rather than erroring the turn.
                 if !self.full_config.workload_uses_local("learning") {
                     if let Some(provider) = self.provider.as_ref() {
+                        let model = self.provider_model.as_deref().unwrap_or("hint:reasoning");
                         tracing::info!(
                             "[learning::reflection] local_ai.usage.learning_reflection not enabled — \
-                             falling back to cloud provider"
+                             falling back to configured external provider"
                         );
-                        return provider
-                            .simple_chat(prompt, "hint:reasoning", 0.3)
-                            .await
-                            .map_err(|e| anyhow::anyhow!("cloud reflection fallback failed: {e}"));
+                        return provider.simple_chat(prompt, model, 0.3).await.map_err(|e| {
+                            anyhow::anyhow!("external reflection fallback failed: {e}")
+                        });
                     }
                     tracing::info!(
                         "[learning::reflection] local_ai.usage.learning_reflection not enabled \
-                         and no cloud provider configured — skipping reflection"
+                         and no external provider configured — skipping reflection"
                     );
                     return Ok(String::new());
                 }
                 // Local reflection acquires the scheduler_gate LLM
                 // permit transitively through `service.prompt` →
                 // `inference_with_temperature_internal`. Cloud
-                // reflection skips the gate (#1073 intentionally
-                // gates only local routes; cloud rate limiting is
+                // external reflection skips the gate (#1073 intentionally
+                // gates only local routes; external rate limiting is
                 // tracked separately).
                 log::debug!(
                     "[learning::reflection] local route — gate permit acquired via LocalAiService"
@@ -194,9 +206,10 @@ impl ReflectionHook {
             }
             ReflectionSource::Cloud => {
                 let provider = self.provider.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("no cloud provider configured for reflection")
+                    anyhow::anyhow!("no external provider configured for reflection")
                 })?;
-                provider.simple_chat(prompt, "hint:reasoning", 0.3).await
+                let model = self.provider_model.as_deref().unwrap_or("hint:reasoning");
+                provider.simple_chat(prompt, model, 0.3).await
             }
         }
     }

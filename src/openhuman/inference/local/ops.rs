@@ -10,7 +10,6 @@ use crate::openhuman::agent::Agent;
 use crate::openhuman::config::Config;
 use crate::openhuman::inference::local as local_ai;
 use crate::openhuman::inference::provider as providers;
-use crate::openhuman::inference::provider::ops::ProviderRuntimeOptions;
 use crate::openhuman::inference::{
     LocalAiAssetsStatus, LocalAiDownloadsProgress, LocalAiEmbeddingResult, LocalAiSpeechResult,
     LocalAiStatus, LocalAiTtsResult,
@@ -97,34 +96,14 @@ pub async fn agent_chat_simple(
         effective.default_temperature = temp;
     }
 
-    let default_model = effective
-        .default_model
-        .clone()
-        .unwrap_or_else(|| crate::openhuman::config::DEFAULT_MODEL.to_string());
-
-    let options = ProviderRuntimeOptions {
-        auth_profile_override: None,
-        openhuman_dir: effective.config_path.parent().map(std::path::PathBuf::from),
-        secrets_encrypt: effective.secrets.encrypt,
-        reasoning_enabled: effective.runtime.reasoning_enabled,
-    };
-
-    let provider = providers::create_routed_provider_with_options(
-        config.inference_url.as_deref(),
-        None,
-        config.api_key.as_deref(),
-        &effective.reliability,
-        &effective.model_routes,
-        default_model.as_str(),
-        &options,
-    )
-    .map_err(|e| e.to_string())?;
+    let (provider, resolved_model) =
+        providers::create_chat_provider("chat", &effective).map_err(|e| e.to_string())?;
 
     let response = provider
         .chat_with_system(
             None,
             message,
-            default_model.as_str(),
+            resolved_model.as_str(),
             effective.default_temperature,
         )
         .await

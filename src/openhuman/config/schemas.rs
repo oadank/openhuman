@@ -50,9 +50,8 @@ struct ModelSettingsUpdate {
     default_temperature: Option<f64>,
     /// When present, REPLACES `config.model_routes` wholesale with these
     /// `(hint, model)` pairs. Send `Some([])` to clear all routes (used when
-    /// the user switches back to the OpenHuman backend whose built-in router
-    /// picks per-task models on its own). Omit to leave existing routes
-    /// untouched.
+    /// the user switches back to workload-level provider strings). Omit to
+    /// leave existing routes untouched.
     model_routes: Option<Vec<ModelRouteUpdate>>,
     /// When present, REPLACES `config.cloud_providers` wholesale. The keys
     /// themselves live in `auth-profiles.json` via
@@ -384,8 +383,14 @@ pub fn schemas(function: &str) -> ControllerSchema {
             function: "update_model_settings",
             description: "Update model and direct provider connection settings.",
             inputs: vec![
-                optional_string("inference_url", "Custom OpenAI-compatible LLM endpoint. When set together with `api_key`, inference goes direct to this URL. Pass an empty string to clear."),
-                optional_string("api_key", "Optional API key for the configured inference endpoint. Pass an empty string to clear a previously stored key."),
+                optional_string(
+                    "inference_url",
+                    "Custom OpenAI-compatible LLM endpoint. When set together with `api_key`, inference goes direct to this URL. Pass an empty string to clear.",
+                ),
+                optional_string(
+                    "api_key",
+                    "Optional API key for the configured inference endpoint. Pass an empty string to clear a previously stored key.",
+                ),
                 optional_string("default_model", "Default model id."),
                 FieldSchema {
                     name: "default_temperature",
@@ -396,25 +401,55 @@ pub fn schemas(function: &str) -> ControllerSchema {
                 FieldSchema {
                     name: "model_routes",
                     ty: TypeSchema::Option(Box::new(TypeSchema::Json)),
-                    comment: "Optional list of {hint, model} pairs mapping task hints (reasoning, agentic, coding, summarization) to provider-specific model ids. Replaces config.model_routes wholesale; send [] to clear (e.g. when switching back to the OpenHuman built-in router).",
+                    comment: "Optional list of {hint, model} pairs mapping task hints (reasoning, agentic, coding, summarization) to provider-specific model ids. Replaces config.model_routes wholesale; send [] to clear.",
                     required: false,
                 },
                 FieldSchema {
                     name: "cloud_providers",
                     ty: TypeSchema::Option(Box::new(TypeSchema::Json)),
-                    comment: "Optional list of cloud provider entries {id, slug, label, endpoint, auth_style}. API keys are stored separately via cloud_provider_set_key. Replaces config.cloud_providers wholesale.",
+                    comment: "Optional list of external provider entries {id, slug, label, endpoint, auth_style}. API keys are stored separately via auth provider credentials. Replaces config.cloud_providers wholesale.",
                     required: false,
                 },
-                optional_string("primary_cloud", "id of the cloud_providers entry used when a workload routes to 'cloud'. Empty string clears."),
-                optional_string("chat_provider", "Provider string for direct conversational chat workloads."),
-                optional_string("reasoning_provider", "Provider string for the main reasoning workload (e.g. 'cloud', 'ollama:llama3.1:8b', 'openai:gpt-4o')."),
-                optional_string("agentic_provider", "Provider string for sub-agent / tool-loop workloads."),
-                optional_string("coding_provider", "Provider string for code-generation workloads."),
-                optional_string("memory_provider", "Provider string for memory-tree extract + summarise."),
-                optional_string("embeddings_provider", "Provider string for embedding generation."),
-                optional_string("heartbeat_provider", "Provider string for the heartbeat background-reasoning loop."),
-                optional_string("learning_provider", "Provider string for learning / reflection passes."),
-                optional_string("subconscious_provider", "Provider string for subconscious evaluation."),
+                optional_string(
+                    "primary_cloud",
+                    "Legacy id of the cloud_providers entry used by old 'cloud' workload sentinels. Empty string clears.",
+                ),
+                optional_string(
+                    "chat_provider",
+                    "Provider string for direct conversational chat workloads.",
+                ),
+                optional_string(
+                    "reasoning_provider",
+                    "Provider string for the main reasoning workload (e.g. 'ollama:llama3.1:8b', 'openai:gpt-4o').",
+                ),
+                optional_string(
+                    "agentic_provider",
+                    "Provider string for sub-agent / tool-loop workloads.",
+                ),
+                optional_string(
+                    "coding_provider",
+                    "Provider string for code-generation workloads.",
+                ),
+                optional_string(
+                    "memory_provider",
+                    "Provider string for memory-tree extract + summarise.",
+                ),
+                optional_string(
+                    "embeddings_provider",
+                    "Provider string for embedding generation.",
+                ),
+                optional_string(
+                    "heartbeat_provider",
+                    "Provider string for the heartbeat background-reasoning loop.",
+                ),
+                optional_string(
+                    "learning_provider",
+                    "Provider string for learning / reflection passes.",
+                ),
+                optional_string(
+                    "subconscious_provider",
+                    "Provider string for subconscious evaluation.",
+                ),
             ],
             outputs: vec![json_output("snapshot", "Updated config snapshot.")],
         },
@@ -465,7 +500,10 @@ pub fn schemas(function: &str) -> ControllerSchema {
                     "use_vision_model",
                     "Use a vision LLM for screenshot analysis (false = OCR + text LLM).",
                 ),
-                optional_bool("keep_screenshots", "Keep screenshots on disk after vision processing."),
+                optional_bool(
+                    "keep_screenshots",
+                    "Keep screenshots on disk after vision processing.",
+                ),
                 FieldSchema {
                     name: "allowlist",
                     ty: TypeSchema::Option(Box::new(TypeSchema::Array(Box::new(
@@ -505,8 +543,7 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "update_local_ai_settings" => ControllerSchema {
             namespace: "config",
             function: "update_local_ai_settings",
-            description:
-                "Update the local AI runtime master switch and per-feature usage flags.",
+            description: "Update the local AI runtime master switch and per-feature usage flags.",
             inputs: vec![
                 optional_bool(
                     "runtime_enabled",
@@ -643,8 +680,7 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "update_meet_settings" => ControllerSchema {
             namespace: "config",
             function: "update_meet_settings",
-            description:
-                "Update Google Meet integration settings (currently the auto-orchestrator-handoff privacy gate).",
+            description: "Update Google Meet integration settings (currently the auto-orchestrator-handoff privacy gate).",
             inputs: vec![optional_bool(
                 "auto_orchestrator_handoff",
                 "When true, ending a Meet call hands the transcript to the orchestrator for proactive follow-up actions.",
@@ -673,16 +709,14 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "reset_local_data" => ControllerSchema {
             namespace: "config",
             function: "reset_local_data",
-            description:
-                "Delete local OpenHuman data for the active config/workspace so the next restart boots clean.",
+            description: "Delete local OpenHuman data for the active config/workspace so the next restart boots clean.",
             inputs: vec![],
             outputs: vec![json_output("result", "Reset result with removed paths.")],
         },
         "get_data_paths" => ControllerSchema {
             namespace: "config",
             function: "get_data_paths",
-            description:
-                "Resolve the OpenHuman data directories (current workspace, default ~/.openhuman, active workspace marker) that reset_local_data would remove. Read-only — performs no filesystem changes.",
+            description: "Resolve the OpenHuman data directories (current workspace, default ~/.openhuman, active workspace marker) that reset_local_data would remove. Read-only — performs no filesystem changes.",
             inputs: vec![],
             outputs: vec![json_output(
                 "paths",
@@ -716,7 +750,10 @@ pub fn schemas(function: &str) -> ControllerSchema {
                 optional_bool("enabled", "Enable voice dictation."),
                 optional_string("hotkey", "Global hotkey string (e.g. Fn)."),
                 optional_string("activation_mode", "Activation mode: toggle or push."),
-                optional_bool("llm_refinement", "Enable LLM post-processing of transcription."),
+                optional_bool(
+                    "llm_refinement",
+                    "Enable LLM post-processing of transcription.",
+                ),
                 optional_bool("streaming", "Enable WebSocket streaming transcription."),
                 FieldSchema {
                     name: "streaming_interval_ms",
@@ -739,10 +776,16 @@ pub fn schemas(function: &str) -> ControllerSchema {
             function: "update_voice_server_settings",
             description: "Update voice server settings.",
             inputs: vec![
-                optional_bool("auto_start", "Start the voice server automatically with the core."),
+                optional_bool(
+                    "auto_start",
+                    "Start the voice server automatically with the core.",
+                ),
                 optional_string("hotkey", "Voice server hotkey string (e.g. Fn)."),
                 optional_string("activation_mode", "Activation mode: tap or push."),
-                optional_bool("skip_cleanup", "Skip LLM cleanup and keep dictation verbatim."),
+                optional_bool(
+                    "skip_cleanup",
+                    "Skip LLM cleanup and keep dictation verbatim.",
+                ),
                 FieldSchema {
                     name: "min_duration_secs",
                     ty: TypeSchema::Option(Box::new(TypeSchema::F64)),
@@ -784,8 +827,7 @@ pub fn schemas(function: &str) -> ControllerSchema {
         "update_composio_trigger_settings" => ControllerSchema {
             namespace: "config",
             function: "update_composio_trigger_settings",
-            description:
-                "Update Composio trigger-triage settings. When triage is disabled the \
+            description: "Update Composio trigger-triage settings. When triage is disabled the \
                  local LLM is NOT invoked per trigger — events are still archived to \
                  trigger history.",
             inputs: vec![
@@ -886,7 +928,7 @@ fn handle_update_model_settings(params: Map<String, Value>) -> ControllerFuture 
                             let slug = e.slug.trim().to_string();
                             if slug.is_empty() {
                                 return Err(
-                                    "cloud provider slug must not be empty".to_string()
+                                    "external provider slug must not be empty".to_string()
                                 );
                             }
                             if is_slug_reserved(&slug) {

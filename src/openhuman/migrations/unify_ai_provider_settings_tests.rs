@@ -80,7 +80,7 @@ fn openhuman_inference_url_does_not_seed_custom() {
 fn embeddings_provider_derived_from_legacy_usage() {
     let mut c = make_legacy_config_local_on();
     let stats = run(&mut c).expect("migration must succeed");
-    assert!(stats.workload_fields_filled >= 5);
+    assert!(stats.workload_fields_filled >= 4);
     assert_eq!(c.embeddings_provider.as_deref(), Some("ollama:bge-m3"));
 }
 
@@ -102,11 +102,11 @@ fn subconscious_provider_derived_from_legacy_usage() {
 }
 
 #[test]
-fn learning_provider_defaults_to_cloud_when_flag_off() {
+fn learning_provider_stays_unset_when_legacy_local_flag_off() {
     // learning_reflection is `false` in our fixture.
     let mut c = make_legacy_config_local_on();
     let _ = run(&mut c).unwrap();
-    assert_eq!(c.learning_provider.as_deref(), Some("cloud"));
+    assert_eq!(c.learning_provider, None);
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn memory_provider_defaults_to_local_ollama_in_local_oauth_fork() {
     // where `llm_backend = Cloud` produced `memory_provider = "cloud"`
     // — that path was tied to the dead OpenHuman backend's
     // `summarization-v1` model, which is no longer reachable in this
-    // fork. Users who explicitly want cloud routing for memory can
+    // fork. Users who explicitly want external-provider routing for memory can
     // still set `memory_provider = "<slug>:<model>"` themselves; the
     // factory's `provider_for_role("memory", ...)` honours it.
     let mut c = Config::default();
@@ -142,7 +142,7 @@ fn chat_workload_providers_left_unset() {
     let mut c = make_legacy_config_local_on();
     let _ = run(&mut c).unwrap();
     // Reasoning/agentic/coding have no legacy equivalent — they stay None
-    // and the factory defaults them to "openhuman" at runtime.
+    // and the factory defaults them to the configured external provider at runtime.
     assert_eq!(c.reasoning_provider, None);
     assert_eq!(c.agentic_provider, None);
     assert_eq!(c.coding_provider, None);
@@ -172,13 +172,15 @@ fn idempotent_second_run_is_noop() {
 }
 
 #[test]
-fn runtime_disabled_falls_back_to_cloud_even_with_usage_flags() {
+fn runtime_disabled_leaves_remote_workloads_unset_even_with_usage_flags() {
     let mut c = make_legacy_config_local_on();
     c.local_ai.runtime_enabled = false;
     let _ = run(&mut c).unwrap();
-    // With runtime off, every workload routes to cloud regardless of usage.*
-    assert_eq!(c.heartbeat_provider.as_deref(), Some("cloud"));
-    assert_eq!(c.subconscious_provider.as_deref(), Some("cloud"));
-    assert_eq!(c.embeddings_provider.as_deref(), Some("cloud"));
-    assert_eq!(c.memory_provider.as_deref(), Some("cloud"));
+    // With runtime off, remote/external routing is represented by an unset
+    // field. The factory resolves the user's configured external provider
+    // without reintroducing the removed "cloud" sentinel.
+    assert_eq!(c.heartbeat_provider, None);
+    assert_eq!(c.subconscious_provider, None);
+    assert_eq!(c.embeddings_provider, None);
+    assert_eq!(c.memory_provider, None);
 }

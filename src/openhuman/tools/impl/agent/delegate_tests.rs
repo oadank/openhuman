@@ -207,7 +207,11 @@ async fn delegate_context_is_prepended_to_prompt() {
 
     assert!(result.is_error);
     assert!(
-        result.output().contains("Agent 'tester' failed") || result.output().contains("timed out")
+        result.output().contains("Agent 'tester' failed")
+            || result.output().contains("timed out")
+            || result
+                .output()
+                .contains("Failed to create inference client")
     );
 }
 
@@ -235,7 +239,11 @@ async fn delegate_empty_context_omits_prefix() {
 
     assert!(result.is_error);
     assert!(
-        result.output().contains("Agent 'tester' failed") || result.output().contains("timed out")
+        result.output().contains("Agent 'tester' failed")
+            || result.output().contains("timed out")
+            || result
+                .output()
+                .contains("Failed to create inference client")
     );
 }
 

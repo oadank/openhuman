@@ -385,6 +385,7 @@ const pt5: TranslationMap = {
   'composio.reconnect': 'Reconectar',
   'composio.directModeRequiresKey':
     'Falha ao salvar. O modo Direto requer uma chave de API não vazia.',
+  'composio.triggersTitle': 'Gatilhos Composio',
   'composio.notYetRouted': 'ainda não roteado',
   'composio.triggers.loading': 'Carregando…',
   'conversations.taskKanban.todo': 'A fazer',

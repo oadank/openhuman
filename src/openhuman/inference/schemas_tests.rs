@@ -32,6 +32,7 @@ fn inference_schema_function_names_are_stable() {
     assert!(functions.contains(&"update_model_settings"));
     assert!(functions.contains(&"update_local_settings"));
     assert!(functions.contains(&"list_models"));
+    assert!(functions.contains(&"test_provider"));
     assert!(functions.contains(&"device_profile"));
     assert!(functions.contains(&"presets"));
     assert!(functions.contains(&"apply_preset"));

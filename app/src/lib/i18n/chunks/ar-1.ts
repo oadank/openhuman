@@ -63,7 +63,7 @@ const ar1: TranslationMap = {
   'settings.aiModels': 'الذكاء الاصطناعي والنماذج',
   'settings.aiModelsDesc': 'إعداد نموذج الذكاء الاصطناعي المحلي وتنزيلاته ومزود LLM',
   'settings.ai': 'إعداد الذكاء الاصطناعي',
-  'settings.aiDesc': 'مزودو السحابة ونماذج Ollama المحلية والتوجيه لكل عبء عمل',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'إعادة الجولة التعريفية',
   'settings.restartTourDesc': 'إعادة تشغيل جولة المنتج من البداية',
   'settings.about': 'حول',

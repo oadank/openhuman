@@ -142,7 +142,7 @@ impl MemoryContextWindow {
 /// Configuration for a delegate sub-agent used by the `delegate` tool.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DelegateAgentConfig {
-    /// Model name (inference uses the OpenHuman backend from main config).
+    /// Model id or provider string resolved through the main AI provider config.
     pub model: String,
     /// Optional system prompt for the sub-agent
     #[serde(default)]

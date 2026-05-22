@@ -63,7 +63,7 @@ const hi1: TranslationMap = {
   'settings.aiModels': 'AI और मॉडल्स',
   'settings.aiModelsDesc': 'लोकल AI मॉडल सेटअप, डाउनलोड और LLM प्रोवाइडर',
   'settings.ai': 'AI कॉन्फिगरेशन',
-  'settings.aiDesc': 'क्लाउड प्रोवाइडर, लोकल Ollama मॉडल और वर्कलोड रूटिंग',
+  'settings.aiDesc': 'External providers, local Ollama models, and per-workload routing',
   'settings.restartTour': 'टूर फिर से शुरू करें',
   'settings.restartTourDesc': 'प्रोडक्ट वॉकथ्रू शुरू से देखें',
   'settings.about': 'के बारे में',
