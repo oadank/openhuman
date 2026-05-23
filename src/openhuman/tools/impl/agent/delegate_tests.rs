@@ -253,6 +253,29 @@ fn delegate_depth_construction() {
     assert_eq!(tool.depth, 5);
 }
 
+#[test]
+fn delegate_model_pin_uses_configured_provider_slug_as_provider_ref() {
+    let mut config = Config::default();
+    config.cloud_providers.push(
+        crate::openhuman::config::schema::cloud_providers::CloudProviderCreds {
+            slug: "openai".to_string(),
+            ..Default::default()
+        },
+    );
+
+    assert!(delegate_model_is_provider_ref(
+        "openai:gpt-4o-mini",
+        &config
+    ));
+}
+
+#[test]
+fn delegate_model_pin_keeps_unconfigured_colon_model_as_bare_model() {
+    let config = Config::default();
+
+    assert!(!delegate_model_is_provider_ref("qwen2.5:7b", &config));
+}
+
 #[tokio::test]
 async fn delegate_no_agents_configured() {
     let tool = DelegateTool::new(HashMap::new(), test_security());

@@ -1,5 +1,5 @@
 /**
- * coreHealthMonitor — polls the core server's public HTTP liveness endpoint
+ * coreHealthMonitor — polls the core server's HTTP liveness endpoint
  * and dispatches `setCore` to the connectivitySlice (#1527).
  *
  * Polling cadence is adaptive:
@@ -12,6 +12,7 @@
  */
 import { setCore } from '../store/connectivitySlice';
 import { store } from '../store/index';
+import { getStoredCoreToken } from '../utils/configPersistence';
 import { getCoreHttpBaseUrl } from './coreRpcClient';
 
 const HEALTHY_INTERVAL_MS = 30_000;
@@ -38,13 +39,22 @@ function healthUrl(baseUrl: string, path: '/health/live' | '/health'): string {
   return new URL(path.replace(/^\//, ''), normalizedBase).toString();
 }
 
-async function fetchHealthPath(baseUrl: string, path: '/health/live' | '/health'): Promise<void> {
+async function fetchHealthPath(
+  baseUrl: string,
+  path: '/health/live' | '/health',
+  token: string | null
+): Promise<void> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   try {
     const response = await fetch(healthUrl(baseUrl, path), {
       method: 'GET',
       cache: 'no-store',
+      headers,
       signal: controller.signal,
     });
 
@@ -68,14 +78,15 @@ async function fetchHealthPath(baseUrl: string, path: '/health/live' | '/health'
 
 async function probeCoreHealth(): Promise<void> {
   const baseUrl = await getCoreHttpBaseUrl();
+  const token = getStoredCoreToken();
   try {
-    await fetchHealthPath(baseUrl, '/health/live');
+    await fetchHealthPath(baseUrl, '/health/live', token);
   } catch (err) {
     // Older cores only expose `/health`, and older auth allow-lists may
     // protect `/health/live`. Fall back to the legacy endpoint only for
     // endpoint-shape failures; transport failures still mean the core is down.
     if (err instanceof CoreHealthProbeError && (err.status === 401 || err.status === 404)) {
-      await fetchHealthPath(baseUrl, '/health');
+      await fetchHealthPath(baseUrl, '/health', token);
       return;
     }
     throw err;

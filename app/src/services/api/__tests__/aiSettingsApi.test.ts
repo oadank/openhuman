@@ -12,6 +12,7 @@ import {
   type AISettings,
   clearCloudProviderKey,
   flushCloudProviders,
+  listModelsRaw,
   listProviderModels,
   loadAISettings,
   loadLocalProviderSnapshot,
@@ -23,6 +24,7 @@ import {
   setCloudProviderKey,
   setLocalRuntimeEnabled,
   testCloudProvider,
+  testEndpoint,
 } from '../aiSettingsApi';
 
 // ─── Mock declarations (must be hoisted before imports) ───────────────────────
@@ -714,6 +716,87 @@ describe('listProviderModels', () => {
     const models = await listProviderModels('openai');
 
     expect(models).toEqual([]);
+  });
+});
+
+// ─── raw endpoint probing ─────────────────────────────────────────────────────
+
+describe('listModelsRaw', () => {
+  beforeEach(() => {
+    mockCallCoreRpc.mockReset();
+    mockIsTauri.mockReturnValue(true);
+  });
+
+  it('passes auth_style through to the raw model-list RPC', async () => {
+    mockCallCoreRpc.mockResolvedValue({
+      result: { models: [{ id: 'claude-sonnet-4-6', owned_by: 'anthropic' }] },
+    });
+
+    const models = await listModelsRaw('https://api.anthropic.com/v1', 'sk-ant-test', 'anthropic');
+
+    expect(mockCallCoreRpc).toHaveBeenCalledWith({
+      method: 'openhuman.inference_list_models_raw',
+      params: {
+        endpoint: 'https://api.anthropic.com/v1',
+        api_key: 'sk-ant-test',
+        auth_style: 'anthropic',
+      },
+    });
+    expect(models[0].id).toBe('claude-sonnet-4-6');
+  });
+
+  it('returns an empty list outside the desktop runtime', async () => {
+    mockIsTauri.mockReturnValue(false);
+
+    await expect(listModelsRaw('http://127.0.0.1:11434/v1', '', 'none')).resolves.toEqual([]);
+    expect(mockCallCoreRpc).not.toHaveBeenCalled();
+  });
+});
+
+describe('testEndpoint', () => {
+  beforeEach(() => {
+    mockCallCoreRpc.mockReset();
+    mockIsTauri.mockReturnValue(true);
+  });
+
+  it('passes auth_style through to the raw endpoint test RPC', async () => {
+    mockCallCoreRpc.mockResolvedValue({
+      result: {
+        ok: true,
+        provider_id: 'test_endpoint',
+        provider_slug: 'test_endpoint',
+        model: 'claude-sonnet-4-6',
+        latency_ms: 42,
+        response_preview: 'openhuman-provider-ok',
+      },
+    });
+
+    const result = await testEndpoint(
+      'https://api.anthropic.com/v1',
+      'sk-ant-test',
+      'claude-sonnet-4-6',
+      'anthropic'
+    );
+
+    expect(mockCallCoreRpc).toHaveBeenCalledWith({
+      method: 'openhuman.inference_test_endpoint',
+      params: {
+        endpoint: 'https://api.anthropic.com/v1',
+        api_key: 'sk-ant-test',
+        model: 'claude-sonnet-4-6',
+        auth_style: 'anthropic',
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('throws outside the desktop runtime', async () => {
+    mockIsTauri.mockReturnValue(false);
+
+    await expect(testEndpoint('http://127.0.0.1:11434/v1', '', 'llama3', 'none')).rejects.toThrow(
+      'Provider tests require the desktop app runtime'
+    );
+    expect(mockCallCoreRpc).not.toHaveBeenCalled();
   });
 });
 

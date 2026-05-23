@@ -30,7 +30,7 @@ import {
   testCloudProvider,
   testEndpoint,
 } from '../../../services/api/aiSettingsApi';
-import type { AuthStyle } from '../../../utils/tauriCommands/config';
+import type { AuthStyle, CloudProviderCreds } from '../../../utils/tauriCommands/config';
 import {
   type HeartbeatPlannerSummary,
   type HeartbeatSettings,
@@ -269,11 +269,26 @@ function toApiSettings(panel: AISettings): ApiAISettings {
   };
 }
 
+const EAGER_FLUSH_RESERVED_SLUGS = new Set(['', 'cloud', 'openhuman', 'pid']);
+
+function providersForConfigFlush(providers: CloudProvider[]): CloudProviderCreds[] {
+  return providers
+    .filter(p => !EAGER_FLUSH_RESERVED_SLUGS.has(p.slug))
+    .map(p => ({
+      id: p.id,
+      slug: p.slug,
+      label: p.label,
+      endpoint: p.endpoint,
+      auth_style: p.authStyle,
+    }));
+}
+
 function useAISettings() {
   const [saved, setSaved] = useState<AISettings>(EMPTY_SETTINGS);
   const [draft, setDraft] = useState<AISettings>(EMPTY_SETTINGS);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
+  const configFlushQueue = useRef<Promise<void>>(Promise.resolve());
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -296,49 +311,58 @@ function useAISettings() {
     void reload();
   }, [reload]);
 
+  const enqueueConfigFlush = useCallback((providers: CloudProviderCreds[]) => {
+    const flush = configFlushQueue.current
+      .catch(() => undefined)
+      .then(() => flushCloudProviders(providers));
+    configFlushQueue.current = flush.catch(() => undefined);
+    return flush;
+  }, []);
+
   // Eagerly persist user-configured external providers whenever they diverge from
   // the saved snapshot so listProviderModels can resolve by slug immediately
-  // after a provider is added, before the global Save. Reserved slugs
-  // ("openhuman", "ollama", "cloud", "pid") are built-ins that Rust rejects as
-  // custom providers — filter them out before flushing.
+  // after a provider is added, before the global Save. Reserved slugs are
+  // sentinels that Rust rejects as custom providers; local runtime slugs
+  // (ollama/lmstudio) are real provider rows and must be flushed.
   useEffect(() => {
     if (loading) return;
-    const userProviders = draft.cloudProviders.filter(
-      p => !['', 'cloud', 'openhuman', 'pid'].includes(p.slug)
-    );
-    const savedUserProviders = saved.cloudProviders.filter(
-      p => !['', 'cloud', 'openhuman', 'pid'].includes(p.slug)
-    );
+    const userProviders = providersForConfigFlush(draft.cloudProviders);
+    const savedUserProviders = providersForConfigFlush(saved.cloudProviders);
     if (JSON.stringify(userProviders) === JSON.stringify(savedUserProviders)) return;
-    const wire = userProviders.map(p => ({
-      id: p.id,
-      slug: p.slug,
-      label: p.label,
-      endpoint: p.endpoint,
-      auth_style: p.authStyle,
-    }));
-    flushCloudProviders(wire).catch(err =>
+    enqueueConfigFlush(userProviders).catch(err =>
       console.warn('[ai-settings] eager cloud_providers flush failed:', err)
     );
-  }, [draft.cloudProviders, loading, saved.cloudProviders]);
+  }, [draft.cloudProviders, enqueueConfigFlush, loading, saved.cloudProviders]);
 
   const isDirty = JSON.stringify(saved) !== JSON.stringify(draft);
 
-  const save = useCallback(async (explicitNext?: AISettings) => {
-    const nextDraft = explicitNext ?? draft;
+  const save = useCallback(
+    async (explicitNext?: AISettings) => {
+      const nextDraft = explicitNext ?? draft;
+      try {
+        const prevApi = toApiSettings(saved);
+        const nextApi = toApiSettings(nextDraft);
+        await saveAISettings(prevApi, nextApi);
+        setSaved(nextDraft);
+        if (explicitNext) setDraft(explicitNext);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to save AI settings';
+        setError(message);
+      }
+    },
+    [saved, draft]
+  );
+
+  const discard = useCallback(async () => {
+    setError('');
     try {
-      const prevApi = toApiSettings(saved);
-      const nextApi = toApiSettings(nextDraft);
-      await saveAISettings(prevApi, nextApi);
-      setSaved(nextDraft);
-      if (explicitNext) setDraft(explicitNext);
+      await enqueueConfigFlush(providersForConfigFlush(saved.cloudProviders));
+      setDraft(saved);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to save AI settings';
+      const message = err instanceof Error ? err.message : 'Failed to discard AI settings';
       setError(message);
     }
-  }, [saved, draft]);
-
-  const discard = useCallback(() => setDraft(saved), [saved]);
+  }, [enqueueConfigFlush, saved]);
 
   return { saved, draft, setDraft, isDirty, save, discard, loading, error, reload };
 }
@@ -477,26 +501,32 @@ const ProviderToggleChip = ({
 const ProviderKeyDialog = ({
   slug,
   label,
+  valueKind = 'apiKey',
   onCancel,
   onSubmit,
 }: {
   slug: string;
   label: string;
+  valueKind?: 'apiKey' | 'endpoint';
   onCancel: () => void;
-  onSubmit: (apiKey: string) => Promise<void> | void;
+  onSubmit: (value: string) => Promise<void> | void;
 }) => {
   const { t } = useT();
-  const [apiKey, setApiKey] = useState('');
+  const [value, setValue] = useState(() =>
+    valueKind === 'endpoint' ? defaultEndpointFor(slug) : ''
+  );
   const [phase, setPhase] = useState<'idle' | 'saving'>('idle');
   const [error, setError] = useState<string | null>(null);
   const busy = phase !== 'idle';
+  const isEndpoint = valueKind === 'endpoint';
   const connectTemplate = t('settings.ai.connectProvider');
   const connectTitle = connectTemplate.includes('{label}')
     ? connectTemplate.replace('{label}', label)
     : `${connectTemplate} ${label}`;
 
-  const placeholder =
-    slug === 'openai'
+  const placeholder = isEndpoint
+    ? defaultEndpointFor(slug)
+    : slug === 'openai'
       ? 'sk-...'
       : slug === 'anthropic'
         ? 'sk-ant-...'
@@ -505,9 +535,9 @@ const ProviderKeyDialog = ({
           : 'your-api-key';
 
   const handleSave = async () => {
-    const trimmed = apiKey.trim();
+    const trimmed = value.trim();
     if (!trimmed) {
-      setError(t('settings.ai.apiKeyRequired'));
+      setError(isEndpoint ? 'Endpoint URL is required.' : t('settings.ai.apiKeyRequired'));
       return;
     }
     setError(null);
@@ -533,7 +563,9 @@ const ProviderKeyDialog = ({
             {connectTitle}
           </h3>
           <p className="mt-0.5 text-xs text-stone-500 dark:text-neutral-400">
-            {t('settings.ai.apiKeyStoredEncrypted')}
+            {isEndpoint
+              ? 'Local endpoint stored in config.toml.'
+              : t('settings.ai.apiKeyStoredEncrypted')}
           </p>
         </div>
 
@@ -541,7 +573,7 @@ const ProviderKeyDialog = ({
           <label
             htmlFor="provider-key-input"
             className="text-xs font-medium text-stone-700 dark:text-neutral-200">
-            {t('settings.ai.apiKeyFieldLabel')}
+            {isEndpoint ? 'Endpoint URL' : t('settings.ai.apiKeyFieldLabel')}
           </label>
           <input
             id="provider-key-input"
@@ -553,11 +585,11 @@ const ProviderKeyDialog = ({
             data-form-type="other"
             data-lpignore="true"
             data-1p-ignore="true"
-            value={apiKey}
+            value={value}
             placeholder={placeholder}
             disabled={busy}
             onChange={e => {
-              setApiKey(e.target.value);
+              setValue(e.target.value);
               setError(null);
             }}
             className="rounded-lg border border-stone-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-stone-900 dark:text-neutral-100 placeholder-stone-400 dark:placeholder-neutral-500 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 disabled:opacity-60"
@@ -1688,15 +1720,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
         [provider.slug]: { phase: 'running', message: `Testing ${model}...` },
       }));
       try {
-        await flushCloudProviders(
-          draft.cloudProviders.map(p => ({
-            id: p.id,
-            slug: p.slug,
-            label: p.label,
-            endpoint: p.endpoint,
-            auth_style: p.authStyle,
-          }))
-        );
+        await flushCloudProviders(providersForConfigFlush(draft.cloudProviders));
         const result = await testCloudProvider(provider.slug, model);
         setProviderTests(prev => ({
           ...prev,
@@ -2032,7 +2056,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
           diffSummary={diffSummary}
           changeCount={diffSummary.length}
           onSave={() => void save()}
-          onDiscard={discard}
+          onDiscard={() => void discard()}
         />
       )}
 
@@ -2079,10 +2103,9 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                   ? [...draft.cloudProviders, upserted]
                   : draft.cloudProviders.map(p => (p.id === editing.id ? upserted : p));
               // If the user set a default model, apply it as the chat default.
-              const chatDefault =
-                defaultModel
-                  ? ({ kind: 'cloud', providerSlug: upserted.slug, model: defaultModel } as const)
-                  : draft.chatDefault;
+              const chatDefault = defaultModel
+                ? ({ kind: 'cloud', providerSlug: upserted.slug, model: defaultModel } as const)
+                : draft.chatDefault;
               const nextDraft = { ...draft, cloudProviders: list, chatDefault };
               // Auto-save immediately so routing + default_model reach the
               // core without requiring a separate Save bar click.
@@ -2152,11 +2175,12 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
         <ProviderKeyDialog
           slug={keyDialogFor}
           label={pendingLocalLabel ?? BUILTIN_PROVIDER_META[keyDialogFor]?.label ?? keyDialogFor}
+          valueKind={pendingLocalLabel ? 'endpoint' : 'apiKey'}
           onCancel={() => {
             setKeyDialogFor(null);
             setPendingLocalLabel(null);
           }}
-          onSubmit={async apiKey => {
+          onSubmit={async submittedValue => {
             const slug = keyDialogFor;
             const localLabel = pendingLocalLabel;
             setBusyAction(
@@ -2171,7 +2195,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                 id: `p_${slug}_${Math.random().toString(36).slice(2, 7)}`,
                 slug,
                 label: localLabel ?? BUILTIN_PROVIDER_META[slug]?.label ?? slug,
-                endpoint: isLocalRuntime ? apiKey.trim() : defaultEndpointFor(slug),
+                endpoint: isLocalRuntime ? submittedValue.trim() : defaultEndpointFor(slug),
                 authStyle: authStyleForSlug(slug),
                 maskedKey: maskKeyLabel(true),
               };
@@ -2179,7 +2203,7 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
               // failure can't leave config + secrets out of sync.
               if (!isLocalRuntime && slug !== 'openhuman') {
                 try {
-                  await setCloudProviderKey(slug, apiKey);
+                  await setCloudProviderKey(slug, submittedValue);
                 } catch (err) {
                   const msg = err instanceof Error ? err.message : String(err);
                   console.warn('[ai-settings] setCloudProviderKey failed', msg);
@@ -2242,6 +2266,7 @@ const CloudProviderEditor = ({
   } | null>(null);
   const isOpenHuman = slug === 'openhuman';
   const hasExistingKey = (initial?.maskedKey ?? '').startsWith('••••');
+  const effectiveAuthStyle = initial?.authStyle ?? authStyleForSlug(slug);
 
   const fetchModels = async () => {
     const ep = endpoint.trim();
@@ -2249,7 +2274,7 @@ const CloudProviderEditor = ({
     setModelListLoading(true);
     setModelListError(null);
     try {
-      const models = await listModelsRaw(ep, apiKey.trim());
+      const models = await listModelsRaw(ep, apiKey.trim(), effectiveAuthStyle);
       setModelList(models);
     } catch (err) {
       setModelListError(err instanceof Error ? err.message : String(err));
@@ -2263,16 +2288,13 @@ const CloudProviderEditor = ({
     if (!model) return;
     setTestState({ phase: 'running', message: `Testing ${model}…` });
     try {
-      const result = await testEndpoint(endpoint.trim(), apiKey.trim(), model);
+      const result = await testEndpoint(endpoint.trim(), apiKey.trim(), model, effectiveAuthStyle);
       setTestState({
         phase: 'success',
         message: `✓ ${result.latency_ms}ms — ${result.response_preview.slice(0, 80)}`,
       });
     } catch (err) {
-      setTestState({
-        phase: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      setTestState({ phase: 'error', message: err instanceof Error ? err.message : String(err) });
     }
   };
 
@@ -2364,9 +2386,13 @@ const CloudProviderEditor = ({
                   if (e.target.value) setDefaultModel(e.target.value);
                 }}
                 className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200">
-                <option value="">— pick from {modelList.length} fetched model{modelList.length !== 1 ? 's' : ''} —</option>
+                <option value="">
+                  — pick from {modelList.length} fetched model{modelList.length !== 1 ? 's' : ''} —
+                </option>
                 {modelList.map(m => (
-                  <option key={m.id} value={m.id}>{m.id}</option>
+                  <option key={m.id} value={m.id}>
+                    {m.id}
+                  </option>
                 ))}
               </select>
             )}
@@ -2414,49 +2440,49 @@ const CloudProviderEditor = ({
             </p>
           )}
           <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() => void runTest()}
-            disabled={!defaultModel.trim() || !endpoint.trim() || testState?.phase === 'running'}
-            className="rounded-lg border border-stone-200 dark:border-neutral-800 px-3 py-1.5 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 disabled:opacity-40 disabled:cursor-not-allowed">
-            {testState?.phase === 'running' ? 'Testing…' : 'Test connection'}
-          </button>
-          <div className="flex items-center gap-2">
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="rounded-lg border border-stone-200 dark:border-neutral-800 px-3 py-1.5 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 dark:bg-neutral-800/60 dark:hover:bg-neutral-800/60 disabled:opacity-50">
-            {t('common.cancel')}
-          </button>
-          <button
-            onClick={async () => {
-              setSaving(true);
-              try {
-                await onSubmit(
-                  {
-                    id: initial?.id ?? '',
-                    slug,
-                    label: label.trim() || slug,
-                    endpoint: endpoint.trim(),
-                    authStyle: initial?.authStyle ?? authStyleForSlug(slug),
-                    maskedKey: maskKeyLabel(hasExistingKey || apiKey.length > 0),
-                  },
-                  apiKey.trim(),
-                  defaultModel.trim()
-                );
-              } finally {
-                setSaving(false);
-              }
-            }}
-            disabled={saving || !endpoint.trim()}
-            className="rounded-lg bg-primary-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-600 disabled:opacity-50">
-            {saving
-              ? t('settings.ai.saving')
-              : initial
-                ? t('settings.ai.saveChanges')
-                : t('settings.ai.addProvider')}
-          </button>
-          </div>
+            <button
+              type="button"
+              onClick={() => void runTest()}
+              disabled={!defaultModel.trim() || !endpoint.trim() || testState?.phase === 'running'}
+              className="rounded-lg border border-stone-200 dark:border-neutral-800 px-3 py-1.5 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 disabled:opacity-40 disabled:cursor-not-allowed">
+              {testState?.phase === 'running' ? 'Testing…' : 'Test connection'}
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onClose}
+                disabled={saving}
+                className="rounded-lg border border-stone-200 dark:border-neutral-800 px-3 py-1.5 text-xs font-medium text-stone-700 dark:text-neutral-200 hover:bg-stone-50 dark:hover:bg-neutral-800/60 dark:bg-neutral-800/60 dark:hover:bg-neutral-800/60 disabled:opacity-50">
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await onSubmit(
+                      {
+                        id: initial?.id ?? '',
+                        slug,
+                        label: label.trim() || slug,
+                        endpoint: endpoint.trim(),
+                        authStyle: effectiveAuthStyle,
+                        maskedKey: maskKeyLabel(hasExistingKey || apiKey.length > 0),
+                      },
+                      apiKey.trim(),
+                      defaultModel.trim()
+                    );
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                disabled={saving || !endpoint.trim()}
+                className="rounded-lg bg-primary-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-600 disabled:opacity-50">
+                {saving
+                  ? t('settings.ai.saving')
+                  : initial
+                    ? t('settings.ai.saveChanges')
+                    : t('settings.ai.addProvider')}
+              </button>
+            </div>
           </div>
         </div>
       </div>

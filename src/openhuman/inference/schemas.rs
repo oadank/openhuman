@@ -1,5 +1,5 @@
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
 use crate::core::all::{ControllerFuture, RegisteredController};
@@ -127,12 +127,14 @@ struct InferenceTestEndpointParams {
     endpoint: String,
     api_key: Option<String>,
     model: String,
+    auth_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct InferenceListModelsRawParams {
     endpoint: String,
     api_key: Option<String>,
+    auth_style: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -395,8 +397,18 @@ pub fn schemas(function: &str) -> ControllerSchema {
             function: "list_models_raw",
             description: "Fetch the model list from a raw endpoint + API key before saving. No stored provider needed.",
             inputs: vec![
-                required_string("endpoint", "Base URL of the OpenAI-compatible endpoint (e.g. https://api.openai.com/v1)."),
-                optional_string("api_key", "Bearer API key. Omit for auth-free local runtimes."),
+                required_string(
+                    "endpoint",
+                    "Base URL of the OpenAI-compatible endpoint (e.g. https://api.openai.com/v1).",
+                ),
+                optional_string(
+                    "api_key",
+                    "Bearer API key. Omit for auth-free local runtimes.",
+                ),
+                optional_string(
+                    "auth_style",
+                    "Auth header style: bearer, anthropic, or none.",
+                ),
             ],
             outputs: vec![json_output("models", "Provider model list payload.")],
         },
@@ -405,9 +417,19 @@ pub fn schemas(function: &str) -> ControllerSchema {
             function: "test_endpoint",
             description: "Test a raw endpoint + API key before saving, by sending a probe chat completion request. No stored provider needed.",
             inputs: vec![
-                required_string("endpoint", "Base URL of the OpenAI-compatible endpoint (e.g. https://api.openai.com/v1)."),
-                optional_string("api_key", "Bearer API key to test with. Omit for auth-free local runtimes."),
+                required_string(
+                    "endpoint",
+                    "Base URL of the OpenAI-compatible endpoint (e.g. https://api.openai.com/v1).",
+                ),
+                optional_string(
+                    "api_key",
+                    "Bearer API key to test with. Omit for auth-free local runtimes.",
+                ),
                 required_string("model", "Model id to use for the probe completion."),
+                optional_string(
+                    "auth_style",
+                    "Auth header style: bearer, anthropic, or none.",
+                ),
             ],
             outputs: vec![json_output("result", "Provider test result payload.")],
         },
@@ -752,6 +774,7 @@ fn handle_inference_list_models_raw(params: Map<String, Value>) -> ControllerFut
             crate::openhuman::inference::rpc::inference_list_models_raw(
                 &request.endpoint,
                 request.api_key.as_deref(),
+                request.auth_style.as_deref(),
             )
             .await?,
         )
@@ -766,6 +789,7 @@ fn handle_inference_test_endpoint(params: Map<String, Value>) -> ControllerFutur
                 &request.endpoint,
                 request.api_key.as_deref(),
                 &request.model,
+                request.auth_style.as_deref(),
             )
             .await?,
         )

@@ -24,6 +24,7 @@ import {
 } from '../../utils/tauriCommands/auth';
 import { isTauri } from '../../utils/tauriCommands/common';
 import {
+  type AuthStyle,
   type ClientConfig,
   type CloudProviderCreds,
   type ModelSettingsUpdate,
@@ -353,32 +354,30 @@ export async function testCloudProvider(
 export async function testEndpoint(
   endpoint: string,
   apiKey: string,
-  model: string
+  model: string,
+  authStyle: AuthStyle = 'bearer'
 ): Promise<ProviderTestResult> {
   if (!isTauri()) {
     throw new Error('Provider tests require the desktop app runtime.');
   }
   const res = await callCoreRpc<{ result: ProviderTestResult }>({
     method: 'openhuman.inference_test_endpoint',
-    params: {
-      endpoint,
-      api_key: apiKey || undefined,
-      model,
-    },
+    params: { endpoint, api_key: apiKey || undefined, model, auth_style: authStyle },
   });
   return res.result;
 }
 
-export async function listModelsRaw(endpoint: string, apiKey: string): Promise<ModelInfo[]> {
+export async function listModelsRaw(
+  endpoint: string,
+  apiKey: string,
+  authStyle: AuthStyle = 'bearer'
+): Promise<ModelInfo[]> {
   if (!isTauri()) {
     return [];
   }
   const res = await callCoreRpc<{ result: { models: ModelInfo[] } }>({
     method: 'openhuman.inference_list_models_raw',
-    params: {
-      endpoint,
-      api_key: apiKey || undefined,
-    },
+    params: { endpoint, api_key: apiKey || undefined, auth_style: authStyle },
   });
   return res?.result?.models ?? [];
 }

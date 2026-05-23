@@ -15,6 +15,11 @@ vi.mock('../../store/connectivitySlice', () => ({ setCore: (p: unknown) => setCo
 const getCoreHttpBaseUrlMock = vi.fn();
 vi.mock('../coreRpcClient', () => ({ getCoreHttpBaseUrl: getCoreHttpBaseUrlMock }));
 
+const getStoredCoreTokenMock = vi.fn();
+vi.mock('../../utils/configPersistence', () => ({
+  getStoredCoreToken: () => getStoredCoreTokenMock(),
+}));
+
 const fetchMock = vi.fn();
 
 function okHealthResponse(): Response {
@@ -45,6 +50,8 @@ describe('coreHealthMonitor', () => {
     setCoreMock.mockClear();
     getCoreHttpBaseUrlMock.mockReset();
     getCoreHttpBaseUrlMock.mockResolvedValue('http://127.0.0.1:7788');
+    getStoredCoreTokenMock.mockReset();
+    getStoredCoreTokenMock.mockReturnValue(null);
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -78,6 +85,21 @@ describe('coreHealthMonitor', () => {
     await flushPromises();
 
     expect(setCoreMock).toHaveBeenCalledWith({ value: 'reachable' });
+    stopCoreHealthMonitor();
+  });
+
+  it('sends the stored bearer token when probing a cloud core', async () => {
+    getStoredCoreTokenMock.mockReturnValue('cloud-token-abc');
+    fetchMock.mockResolvedValueOnce(okHealthResponse());
+
+    const { startCoreHealthMonitor, stopCoreHealthMonitor } = await import('../coreHealthMonitor');
+    startCoreHealthMonitor();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:7788/health/live',
+      expect.objectContaining({ headers: { Authorization: 'Bearer cloud-token-abc' } })
+    );
     stopCoreHealthMonitor();
   });
 

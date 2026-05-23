@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { listConnections as listComposioConnections } from '../../../../lib/composio/composioApi';
 import {
+  flushCloudProviders,
   loadAISettings,
   loadLocalProviderSnapshot,
   saveAISettings,
@@ -41,8 +42,10 @@ vi.mock('../../../../services/api/aiSettingsApi', () => ({
         ? `ollama:${r.model}`
         : `${r.providerSlug}:${r.model}`
   ),
+  listModelsRaw: vi.fn().mockResolvedValue([]),
   listProviderModels: vi.fn().mockResolvedValue([]),
   testCloudProvider: vi.fn(),
+  testEndpoint: vi.fn(),
   localProvider: { download: vi.fn(), applyPreset: vi.fn() },
   flushCloudProviders: vi.fn().mockResolvedValue(undefined),
 }));
@@ -106,6 +109,9 @@ describe('AIPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(loadAISettings).mockResolvedValue(baseSettings);
+    vi.mocked(saveAISettings).mockResolvedValue(undefined);
+    vi.mocked(setCloudProviderKey).mockResolvedValue(undefined);
+    vi.mocked(flushCloudProviders).mockResolvedValue(undefined);
     vi.mocked(testCloudProvider).mockResolvedValue({
       ok: true,
       provider_id: 'p_openai_1',
@@ -279,6 +285,98 @@ describe('AIPanel', () => {
     await waitFor(() => expect(screen.getByText(/Add external provider/i)).toBeInTheDocument());
     // The simple ProviderKeyDialog should NOT appear.
     expect(screen.queryByRole('dialog', { name: /Connect Custom/i })).not.toBeInTheDocument();
+  });
+
+  it('clicking the Ollama chip opens an endpoint dialog with the default URL', async () => {
+    vi.mocked(loadAISettings).mockResolvedValue({ ...baseSettings, cloudProviders: [] });
+
+    renderWithProviders(<AIPanel />);
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Connect Ollama/i })).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /Connect Ollama/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /Connect Ollama/i })).toBeInTheDocument()
+    );
+    expect(screen.getByLabelText(/Endpoint URL/i)).toHaveValue('http://127.0.0.1:11434/v1');
+    expect(screen.queryByLabelText(/API key/i)).not.toBeInTheDocument();
+  });
+
+  it('discarding an eagerly flushed local provider restores the saved provider config', async () => {
+    vi.mocked(loadAISettings).mockResolvedValue({ ...baseSettings, cloudProviders: [] });
+
+    renderWithProviders(<AIPanel />);
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Connect Ollama/i })).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /Connect Ollama/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /Connect Ollama/i })).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() =>
+      expect(vi.mocked(flushCloudProviders)).toHaveBeenCalledWith([
+        expect.objectContaining({
+          slug: 'ollama',
+          endpoint: 'http://127.0.0.1:11434/v1',
+          auth_style: 'none',
+        }),
+      ])
+    );
+
+    await waitFor(() => expect(screen.getByText(/unsaved change/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Discard/i }));
+
+    await waitFor(() => expect(vi.mocked(flushCloudProviders)).toHaveBeenLastCalledWith([]));
+    await waitFor(() => expect(screen.queryByText(/unsaved change/i)).not.toBeInTheDocument());
+  });
+
+  it('queues discard restore after an in-flight eager provider flush', async () => {
+    vi.mocked(loadAISettings).mockResolvedValue({ ...baseSettings, cloudProviders: [] });
+    const pendingFlushes: Array<{ providers: unknown; resolve: () => void }> = [];
+    vi.mocked(flushCloudProviders).mockImplementation(
+      providers =>
+        new Promise<void>(resolve => {
+          pendingFlushes.push({ providers, resolve });
+        })
+    );
+
+    renderWithProviders(<AIPanel />);
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Connect Ollama/i })).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /Connect Ollama/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /Connect Ollama/i })).toBeInTheDocument()
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(pendingFlushes).toHaveLength(1));
+    expect(pendingFlushes[0].providers).toEqual([
+      expect.objectContaining({
+        slug: 'ollama',
+        endpoint: 'http://127.0.0.1:11434/v1',
+        auth_style: 'none',
+      }),
+    ]);
+
+    await waitFor(() => expect(screen.getByText(/unsaved change/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Discard/i }));
+
+    await Promise.resolve();
+    expect(pendingFlushes).toHaveLength(1);
+
+    pendingFlushes[0].resolve();
+    await waitFor(() => expect(pendingFlushes).toHaveLength(2));
+    expect(pendingFlushes[1].providers).toEqual([]);
+
+    pendingFlushes[1].resolve();
+    await waitFor(() => expect(screen.queryByText(/unsaved change/i)).not.toBeInTheDocument());
   });
 
   // ─── chip toggle: toggle OFF scrubs routing entries ──────────────────────────

@@ -1,14 +1,14 @@
 //! JSON-RPC controller surface for inference operations.
 
-use crate::openhuman::config::rpc as config_rpc;
 use crate::openhuman::config::Config;
+use crate::openhuman::config::rpc as config_rpc;
 use crate::openhuman::inference::local as local_runtime;
 use crate::openhuman::inference::local::ops::{LocalAiChatMessage, ReactionDecision};
 use crate::openhuman::inference::provider as providers;
-use crate::openhuman::inference::{device, presets, sentiment, SentimentResult};
 use crate::openhuman::inference::{LocalAiEmbeddingResult, LocalAiStatus};
+use crate::openhuman::inference::{SentimentResult, device, presets, sentiment};
 use crate::rpc::RpcOutcome;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, error};
 
 const LOG_PREFIX: &str = "[inference::ops]";
@@ -222,9 +222,10 @@ pub async fn inference_test_endpoint(
     endpoint: &str,
     api_key: Option<&str>,
     model: &str,
+    auth_style: Option<&str>,
 ) -> Result<RpcOutcome<Value>, String> {
     debug!(model, "{LOG_PREFIX} test_endpoint:start");
-    let result = providers::ops::test_raw_endpoint(endpoint, api_key, model).await;
+    let result = providers::ops::test_raw_endpoint(endpoint, api_key, model, auth_style).await;
     match &result {
         Ok(_) => debug!("{LOG_PREFIX} test_endpoint:ok"),
         Err(err) => error!(error = %err, "{LOG_PREFIX} test_endpoint:error"),
@@ -235,9 +236,10 @@ pub async fn inference_test_endpoint(
 pub async fn inference_list_models_raw(
     endpoint: &str,
     api_key: Option<&str>,
+    auth_style: Option<&str>,
 ) -> Result<RpcOutcome<Value>, String> {
     debug!("{LOG_PREFIX} list_models_raw:start");
-    let result = providers::ops::list_raw_endpoint_models(endpoint, api_key).await;
+    let result = providers::ops::list_raw_endpoint_models(endpoint, api_key, auth_style).await;
     match &result {
         Ok(_) => debug!("{LOG_PREFIX} list_models_raw:ok"),
         Err(err) => error!(error = %err, "{LOG_PREFIX} list_models_raw:error"),

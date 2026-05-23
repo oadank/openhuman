@@ -294,6 +294,7 @@ pub async fn test_raw_endpoint(
     endpoint: &str,
     api_key: Option<&str>,
     model: &str,
+    auth_style: Option<&str>,
 ) -> Result<crate::rpc::RpcOutcome<serde_json::Value>, String> {
     let endpoint = endpoint.trim();
     let model = model.trim();
@@ -310,17 +311,16 @@ pub async fn test_raw_endpoint(
         model
     );
 
-    use crate::openhuman::inference::provider::compatible::{
-        AuthStyle as CompatAuthStyle, OpenAiCompatibleProvider,
-    };
+    use crate::openhuman::inference::provider::compatible::OpenAiCompatibleProvider;
     use crate::openhuman::inference::provider::traits::Provider;
 
     let key = api_key.map(str::trim).filter(|k| !k.is_empty());
+    let auth_style = parse_endpoint_auth_style(auth_style)?;
     let provider: Box<dyn Provider> = Box::new(OpenAiCompatibleProvider::new(
         "test_endpoint",
         endpoint,
         key,
-        CompatAuthStyle::Bearer,
+        compat_auth_style(auth_style),
     ));
 
     let started = Instant::now();
@@ -373,6 +373,7 @@ pub async fn test_raw_endpoint(
 pub async fn list_raw_endpoint_models(
     endpoint: &str,
     api_key: Option<&str>,
+    auth_style: Option<&str>,
 ) -> Result<crate::rpc::RpcOutcome<serde_json::Value>, String> {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.is_empty() {
@@ -380,9 +381,8 @@ pub async fn list_raw_endpoint_models(
     }
 
     let models_url = format!("{}/models", endpoint);
-    let parsed_url = reqwest::Url::parse(&models_url).map_err(|e| {
-        format!("endpoint '{}' is not a valid URL ({})", endpoint, e)
-    })?;
+    let parsed_url = reqwest::Url::parse(&models_url)
+        .map_err(|e| format!("endpoint '{}' is not a valid URL ({})", endpoint, e))?;
 
     log::debug!(
         "[providers][list_models_raw] fetching url={}",
@@ -409,9 +409,8 @@ pub async fn list_raw_endpoint_models(
 
     let mut request = client.get(&models_url);
     let key = api_key.map(str::trim).filter(|k| !k.is_empty());
-    if let Some(k) = key {
-        request = request.header("Authorization", format!("Bearer {}", k));
-    }
+    let auth_style = parse_endpoint_auth_style(auth_style)?;
+    request = apply_endpoint_auth_headers(request, auth_style, key);
 
     let response = request.send().await.map_err(|e| {
         use std::error::Error;
@@ -434,7 +433,11 @@ pub async fn list_raw_endpoint_models(
         let body = response.text().await.unwrap_or_default();
         let sanitized = sanitize_api_error(&body);
         let truncated = crate::openhuman::util::truncate_with_ellipsis(&sanitized, 300);
-        return Err(format!("provider returned {}: {}", status.as_u16(), truncated));
+        return Err(format!(
+            "provider returned {}: {}",
+            status.as_u16(),
+            truncated
+        ));
     }
 
     let body: serde_json::Value = response
@@ -478,6 +481,50 @@ pub async fn list_raw_endpoint_models(
         serde_json::json!({ "models": models }),
         vec![format!("fetched {} models", models.len())],
     ))
+}
+
+fn parse_endpoint_auth_style(raw: Option<&str>) -> Result<AuthStyle, String> {
+    match raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("bearer")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "bearer" => Ok(AuthStyle::Bearer),
+        "anthropic" => Ok(AuthStyle::Anthropic),
+        "none" => Ok(AuthStyle::None),
+        other => Err(format!(
+            "unknown auth_style '{}'; valid values are bearer, anthropic, none",
+            other
+        )),
+    }
+}
+
+fn compat_auth_style(
+    auth_style: AuthStyle,
+) -> crate::openhuman::inference::provider::compatible::AuthStyle {
+    match auth_style {
+        AuthStyle::Bearer => crate::openhuman::inference::provider::compatible::AuthStyle::Bearer,
+        AuthStyle::Anthropic => {
+            crate::openhuman::inference::provider::compatible::AuthStyle::Anthropic
+        }
+        AuthStyle::None => crate::openhuman::inference::provider::compatible::AuthStyle::None,
+    }
+}
+
+fn apply_endpoint_auth_headers(
+    request: reqwest::RequestBuilder,
+    auth_style: AuthStyle,
+    key: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match (auth_style, key) {
+        (AuthStyle::None, _) | (_, None) => request,
+        (AuthStyle::Bearer, Some(k)) => request.header("Authorization", format!("Bearer {}", k)),
+        (AuthStyle::Anthropic, Some(k)) => request
+            .header("x-api-key", k)
+            .header("anthropic-version", "2023-06-01"),
+    }
 }
 
 fn find_provider_entry<'a>(
@@ -1076,8 +1123,8 @@ mod tests {
         // passes a slug instead of the opaque random id. This lets the frontend
         // call the RPC before the provider config has been persisted (where only
         // the slug is stable).
-        use crate::openhuman::config::schema::cloud_providers::{AuthStyle, CloudProviderCreds};
         use crate::openhuman::config::Config;
+        use crate::openhuman::config::schema::cloud_providers::{AuthStyle, CloudProviderCreds};
 
         let mut config = Config::default();
         config.cloud_providers.push(CloudProviderCreds {
@@ -1251,6 +1298,42 @@ mod tests {
         config.cloud_providers.push(entry.clone());
 
         ensure_provider_has_required_auth(&config, &entry).expect("auth none should not need key");
+    }
+
+    #[test]
+    fn raw_endpoint_auth_style_defaults_to_bearer() {
+        assert_eq!(
+            parse_endpoint_auth_style(None).expect("default style should parse"),
+            AuthStyle::Bearer
+        );
+    }
+
+    #[test]
+    fn raw_endpoint_anthropic_headers_use_x_api_key() {
+        let client = reqwest::Client::new();
+        let request = apply_endpoint_auth_headers(
+            client.get("https://api.anthropic.com/v1/models"),
+            AuthStyle::Anthropic,
+            Some("sk-ant-test"),
+        )
+        .build()
+        .expect("request should build");
+
+        assert_eq!(
+            request
+                .headers()
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok()),
+            Some("sk-ant-test")
+        );
+        assert_eq!(
+            request
+                .headers()
+                .get("anthropic-version")
+                .and_then(|v| v.to_str().ok()),
+            Some("2023-06-01")
+        );
+        assert!(request.headers().get("authorization").is_none());
     }
 
     #[test]
