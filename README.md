@@ -1,191 +1,133 @@
-<h1 align="center">OpenHuman</h1>
+# OpenHuman (fork)
 
-<p align="center">
- <img src="./gitbooks/.gitbook/assets/demo.png" alt="The Tet" />
-</p>
-
-<p align="center" style="display: inline-block">
- <a href="https://trendshift.io/repositories/23680" target="_blank" style="display: inline-block">
-  <img src="https://trendshift.io/api/badge/repositories/23680" alt="tinyhumansai%2Fopenhuman | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/>
- </a> 
- &nbsp;
- <a href="https://www.producthunt.com/products/openhuman?embed=true&amp;utm_source=badge-top-post-badge&amp;utm_medium=badge&amp;utm_campaign=badge-openhuman" target="_blank" rel="noopener noreferrer">
-  <img alt="OpenHuman - An open source AI harness built with the human in mind | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1136902&amp;theme=light&amp;period=daily&amp;t=1778916022823">
- </a>
- 
-</p>
- 
-<p align="center">
- <strong>OpenHuman is your Personal AI super intelligence. Private, Simple and extremely powerful.</strong>
-</p>
-
-
-<p align="center">
- <a href="https://discord.tinyhumans.ai/">Discord</a> •
- <a href="https://www.reddit.com/r/tinyhumansai/">Reddit</a> •
- <a href="https://x.com/intent/follow?screen_name=tinyhumansai">X/Twitter</a> •
- <a href="https://tinyhumans.gitbook.io/openhuman/">Docs</a>
-</p>
-
-<p align="center">
-  🇺🇸 <a href="./README.md">English</a> | 🇨🇳 <a href="./README.zh-CN.md">简体中文</a> | 🇯🇵 <a href="./README.ja-JP.md">日本語</a> | 🇰🇷 <a href="./README.ko.md">한국어</a>
-</p>
-
-
-<p align="center">
- <img src="https://img.shields.io/badge/status-early%20beta-orange" alt="Early Beta" />
- <a href="https://github.com/tinyhumansai/openhuman/releases/latest"><img src="https://img.shields.io/github/v/release/tinyhumansai/openhuman?label=latest" alt="Latest Release" /></a>
- <a href="https://github.com/tinyhumansai/openhuman/stargazers"><img src="https://img.shields.io/github/stars/tinyhumansai/openhuman?style=flat" alt="GitHub Stars" /></a>
- <a href="./LICENSE"><img src="https://img.shields.io/github/license/tinyhumansai/openhuman" alt="License" /></a>
- <a href="./README.zh-CN.md"><img src="https://img.shields.io/badge/lang-简体中文-blue" alt="简体中文" /></a>
- <a href="./README.ja-JP.md"><img src="https://img.shields.io/badge/lang-日本語-blue" alt="日本語" /></a>
- <a href="./README.ko.md"><img src="https://img.shields.io/badge/lang-한국어-blue" alt="한국어" /></a>
-</p>
-
-> **Early Beta**: Under active development. Expect rough edges.
+A fork of [tinyhumansai/openhuman](https://github.com/tinyhumansai/openhuman) with a substantially different deployment model and AI backend strategy. Upstream changes are consumed where they make sense; the product direction and infrastructure assumptions diverge significantly.
 
 ---
 
-## This Fork: Server + Client Topology
+## What's different from upstream
 
-> This is a community fork of [tinyhumansai/openhuman](https://github.com/tinyhumansai/openhuman) that extends the original desktop-only architecture into a **server + client model**, enabling shared deployments, remote access, and a mobile client that is currently under development.
-
-### What's different
-
-| | Upstream | This Fork |
+| | Upstream | This fork |
 |---|---|---|
-| **Core deployment** | In-process inside the desktop app only | Headless server via Docker / VPS / cloud |
-| **Desktop client** | Connects to bundled in-process core | Connects to any `openhuman-core` instance |
-| **Mobile client** | — | Under development (iOS + Android) |
-| **Multi-user / shared** | Not supported | Supported via shared core server |
+| **OpenHuman API** | Required (auth, LLM proxy, billing) | **Removed** — no dependency on `api.openhuman.ai` |
+| **Deployment** | Desktop app only (in-process core) | **Server (container) + client apps** |
+| **AI providers** | Routed through OpenHuman backend | **Direct BYO API keys** — first-class, no proxy |
+| **Local LLM** | Ollama (experimental) | Ollama kept as-is, direction TBD |
+| **Mobile client** | Not present | Under development — target once server topology is validated |
+| **OAuth** | Handled by OpenHuman backend | Native PKCE flows direct to providers |
 
-### Architecture
+---
 
-```mermaid
-graph TB
-    subgraph Server["Self-Hosted Server (Docker / VPS / Cloud)"]
-        Core["openhuman-core\n(Rust · JSON-RPC · :7788)"]
-    end
+## Architecture
 
-    subgraph Clients
-        Desktop["Desktop App\n(Tauri + React)\nWindows · macOS · Linux"]
-        Mobile["Mobile App\n🚧 Under Development\niOS · Android"]
-        Web["Web Client\n(React — browser)"]
-    end
-
-    Desktop -- "HTTP JSON-RPC\n(bearer auth)" --> Core
-    Mobile -- "HTTP JSON-RPC\n(bearer auth)" --> Core
-    Web -- "HTTP JSON-RPC\n(bearer auth)" --> Core
-    Core -- "Direct user-owned APIs\n(native OAuth / BYO keys)" --> Providers["Providers\nGoogle · GitHub · Composio · LLMs"]
+```
+┌─────────────────────────────────────────┐
+│  Self-Hosted Server  (Docker / VPS)     │
+│                                         │
+│  openhuman-core  (Rust · JSON-RPC)      │
+│  ├── Memory tree + Obsidian vault       │
+│  ├── Agent harness + tool surface       │
+│  ├── Native OAuth (Google · GitHub)     │
+│  └── Direct LLM calls (BYO keys)        │
+└──────────────┬──────────────────────────┘
+               │  HTTP JSON-RPC (bearer auth)
+     ┌─────────┴──────────┐
+     │                    │
+ Desktop App          Mobile App
+ (Tauri + React)      (under development)
+ Win · macOS · Linux  iOS · Android
 ```
 
-### Quick-start (server)
+The core runs as a headless server in a container. Clients are thin — they hold no state and connect to any reachable `openhuman-core` instance with a bearer token. There is no shared cloud session, no account login, and no telemetry sent off-device.
+
+---
+
+## AI providers
+
+External AI is the primary path. Configure providers under **Settings → AI** with your own API keys:
+
+| Provider | Auth style | Notes |
+|---|---|---|
+| OpenAI | Bearer | Default primary |
+| Anthropic | Anthropic header | Full support |
+| OpenRouter | Bearer | Multi-model routing |
+| Any OpenAI-compatible endpoint | Bearer / None | LM Studio, vLLM, llama.cpp server, etc. |
+
+Each provider gets a slug, endpoint, and auth style. Workload routing (`chat_provider`, `reasoning_provider`, `agentic_provider`, etc.) maps roles to `<slug>:<model>` strings in `~/.openhuman/config.toml`.
+
+**Ollama** is left as-is from upstream. It works for local inference but its long-term role in this fork is undecided.
+
+---
+
+## Quick-start (server)
 
 ```bash
-# Generate a bearer token — paste this into the desktop/mobile login screen
+# Generate a bearer token
 openssl rand -hex 32
 
-# Run the core server (Docker)
+# Run the core (Docker)
 docker run -d \
+  --name openhuman-core \
   -p 127.0.0.1:7788:7788 \
   -e OPENHUMAN_CORE_HOST=0.0.0.0 \
   -e OPENHUMAN_CORE_TOKEN=<your-token> \
   -v openhuman-workspace:/home/openhuman/.openhuman \
-  ghcr.io/tinyhumansai/openhuman-core:latest
+  ghcr.io/AusAgentSmith/openhuman-core:latest
 ```
 
-See [`docker-compose.yml`](./docker-compose.yml) and [`gitbooks/features/cloud-deploy.md`](./gitbooks/features/cloud-deploy.md) for the local standalone-core reference.
+See [`docker-compose.yml`](./docker-compose.yml) for a more complete reference with volume mounts and restart policy.
+
+Point the desktop app at `http://<server>:7788` and paste the token on first launch.
 
 ---
 
-To install or get started, either download from the website over at [tinyhumans.ai/openhuman](https://tinyhumans.ai/openhuman?utm_source=github&utm_medium=readme) or run
+## Building from source
 
+**Prerequisites**: Git, Node.js 24+, pnpm 10.10.0+, Rust 1.82+ (`rustfmt` + `clippy` components), CMake, Ninja, ripgrep, and platform desktop prerequisites (see upstream docs for platform-specific libs).
+
+```bash
+git clone https://github.com/AusAgentSmith/openhuman.git
+cd openhuman
+git submodule update --init --recursive
+pnpm install
+
+# UI only (Vite dev server)
+pnpm dev
+
+# Full desktop app (requires vendored CEF tauri-cli)
+pnpm dev:app
+
+# Core server binary
+cargo build --bin openhuman-core
+
+# Tests
+pnpm test          # Vitest (frontend)
+pnpm test:rust     # cargo tests + mock API
 ```
-# Download DMG, EXEs over at https://tinyhumans.ai/openhuman or run in from your terminal
 
-# For macOS or Linux x64
-curl -fsSL https://raw.githubusercontent.com/tinyhumansai/openhuman/main/scripts/install.sh | bash
+Run `pnpm typecheck` and `cargo clippy -- -D warnings` before committing.
 
-# For Windows
-irm https://raw.githubusercontent.com/tinyhumansai/openhuman/main/scripts/install.ps1 | iex
-```
+---
 
-# What is OpenHuman?
+## Notable changes vs upstream
 
-OpenHuman is an open-source agentic assistant designed to integrate with you in your daily life. Each bullet links to the deeper writeup in the [docs](https://tinyhumans.gitbook.io/openhuman/).
+- **No OpenHuman API calls** — auth, LLM inference, OAuth handoff, billing, and referral surfaces are all removed or replaced.
+- **Native OAuth** — Google (Gmail / Calendar / Drive) and GitHub use PKCE + loopback redirect (RFC 7636 / RFC 8252). No backend proxy involved.
+- **Direct provider clients** — Gmail, Google Calendar, Google Drive, and GitHub have native API clients in `src/openhuman/providers/` with auto-refresh-on-401.
+- **Composio direct mode** — Composio v3 calls go against the user's own tenant via their personal API key. The backend-proxy mode is removed.
+- **Auth-style-aware endpoint ops** — `test_endpoint` and `list_provider_models` respect the configured auth style (Bearer / Anthropic / None) rather than assuming Bearer for all calls.
+- **Delegate agent provider resolution** — sub-agents with a `<slug>:<model>` model pin resolve directly through the provider factory instead of overriding `default_model`.
+- **Workload routing** — `agentic_provider`, `reasoning_provider`, `coding_provider`, etc. are independently configurable per-workload in config.
+- **TTS via Kokoro** — preferred voice path on Apple Silicon via mlx-audio / kokoro-fastapi. ElevenLabs proxy (required the backend) is effectively dead.
+- Various UI cleanups: provider editor auto-save, model picker from live endpoint, Edit button on provider chips.
 
-- **Simple, UI-first & Human** A clean desktop experience and short onboarding paths take you from install to a working agent in a few clicks — no config-first setup, no terminal required. The agent has [a face](https://tinyhumans.gitbook.io/openhuman/features/mascot): a desktop mascot that speaks, reacts to its surroundings, [joins your Google Meets](https://tinyhumans.gitbook.io/openhuman/features/mascot/meeting-agents) as a real participant, remembers you across weeks, and keeps thinking in the background even when you've stopped typing.
+---
 
-- **[118+ third-party integrations](https://tinyhumans.gitbook.io/openhuman/features/integrations) with [auto-fetch](https://tinyhumans.gitbook.io/openhuman/features/obsidian-wiki/auto-fetch)**: plug into Gmail, Notion, GitHub, Slack, Stripe, Calendar, Drive, Linear, Jira and the rest of your stack with **one-click OAuth**. Every connection is exposed to the agent as a typed tool, and every twenty minutes the core walks each active connection and pulls fresh data into the [memory tree](https://tinyhumans.gitbook.io/openhuman/features/integrations/auto-fetch). No prompts, no polling loops you have to write, so the agent already has tomorrow's context this morning.
+## Upstream sync
 
-- **[Memory Tree](https://tinyhumans.gitbook.io/openhuman/features/memory-tree) + [Obsidian Wiki](https://tinyhumans.gitbook.io/openhuman/features/obsidian-wiki)**: a local-first knowledge base built from your data and your activity. Everything you connect is canonicalized into ≤3k-token Markdown chunks, scored, and folded into hierarchical summary trees stored in **SQLite on your machine**. The same chunks land as `.md` files in an Obsidian-compatible vault you can open, browse and edit, inspired by Karpathy's [obsidian-wiki workflow](https://x.com/karpathy/status/2039805659525644595).
+Upstream commits from `tinyhumansai/openhuman` are cherry-picked or merged selectively. Changes that assume the OpenHuman backend, the Composio OAuth aggregator, or the upstream billing/referral surface are skipped or adapted. The fork diverges on auth, AI routing, and deployment topology — patches in those areas will not track upstream.
 
-- **Batteries included**: web search, a web-fetch [scraper](https://tinyhumans.gitbook.io/openhuman/features/native-tools), a full coder toolset (filesystem, git, lint, test, grep), and [native voice](https://tinyhumans.gitbook.io/openhuman/features/voice) (STT in, ElevenLabs TTS out, mascot lip-sync, live Google Meet agent) are wired in by default. [Model routing](https://tinyhumans.gitbook.io/openhuman/features/model-routing) sends each task to the right LLM (reasoning, fast, or vision) under one subscription. No "install a plugin to read files" friction. [Optional local AI via Ollama](https://tinyhumans.gitbook.io/openhuman/features/model-routing/local-ai) for on-device workloads.
+---
 
-- **[Smart token compression (TokenJuice)](https://tinyhumans.gitbook.io/openhuman/features/token-compression)**: every tool call, scrape result, email body, and search payload is run through a token compression layer before it touches any LLM Model. HTML is converted to Markdown, long URLs are shortened, and verbose tool output is deduped and summarised via a configurable rule overlay etc... CJK, emoji, and other multi-byte text are preserved grapheme-by-grapheme — never stripped. You get the same information but at a fraction of the tokens. Reducing cost &amp; latency by up to 80%.
+## License
 
-- **[Messaging channels](https://tinyhumans.gitbook.io/openhuman/features/integrations#messaging-channels)** and **[privacy & security](https://tinyhumans.gitbook.io/openhuman/features/privacy-and-security)**: inbound/outbound across the channels you already use, with workflow data that stays on device, encrypted locally, treated as yours.
-
-## Contributing from source
-
-New contributor? Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the fork/PR workflow and local validation commands. The short path is:
-
-1. Install Git, Node.js 24+, pnpm 10.10.0, Rust 1.93.0 (`rustfmt` + `clippy`), CMake, Ninja, ripgrep, and the platform desktop build prerequisites.
-2. Fork and clone the repo, then run `git submodule update --init --recursive` before `pnpm install` so the vendored Tauri/CEF sources are present.
-3. Use `pnpm dev` for web-only UI work, `pnpm --filter openhuman-app dev:app` for the desktop shell, and focused checks such as `pnpm typecheck`, `pnpm format:check`, and `cargo check -p openhuman --lib` before opening a PR.
-
-Deeper docs: [Architecture](https://tinyhumans.gitbook.io/openhuman/developing/architecture) · [Getting Set Up](https://tinyhumans.gitbook.io/openhuman/developing/getting-set-up) · [Local Core Deploy](./gitbooks/features/cloud-deploy.md).
-
-## Context in minutes, not weeks
-
-OpenHuman is the first agent harness that gets to know you in minutes. Inspired by [Karpathy's LLM Knowledgebase](https://x.com/karpathy/status/2039805659525644595). Most agents start cold. Hermes learns by watching you work; OpenClaw waits for plugins to ferry context in. Either way, you spend days or weeks before the agent knows enough about your stack to be genuinely useful.
-
-<p align="center">
- <img src="./gitbooks/.gitbook/assets/image (1).png" />
-</p>
-
-> OpenHuman summarizes and compresses all your documents, emails & chats; and creates a memory graph that lets your agent remember everything about you.
-
-OpenHuman skips the wait. Connect your accounts, let [auto-fetch](https://tinyhumans.gitbook.io/openhuman/features/integrations/auto-fetch) pull data locally on a 20-minute loop, and then have [Memory Trees](https://tinyhumans.gitbook.io/openhuman/features/memory-tree) compress everything into Markdown files stored intelligently in a [Karpathy-style Obsidian wiki](https://tinyhumans.gitbook.io/openhuman/features/obsidian-wiki).
-
-In just one sync pass, the agent has full (compressed) context of your inbox, your calendar, your repos, your docs, your messages. No training period. No "give it a few weeks.". It becomes you, controlled by you.
-
-Already self-host [agentmemory](https://github.com/rohitg00/agentmemory) across other coding agents? OpenHuman ships an optional `Memory` backend that proxies to it — set `memory.backend = "agentmemory"` in `config.toml` and the same durable store powers OpenHuman alongside Claude Code, Cursor, Codex, and OpenCode. See the [agentmemory backend](https://tinyhumans.gitbook.io/openhuman/features/obsidian-wiki/agentmemory-backend) page for setup.
-
-## OpenHuman vs Other Agent Harnesses
-
-High-level comparison (products evolve, so verify against each vendor). OpenHuman is built to **minimize vendor sprawl**, keep **workflow knowledge on-device**, and give the agent a **persistent memory** of your data, not only chat.
-
-|                     | Claude Cowork     | OpenClaw          | Hermes Agent      | OpenHuman                          |
-| ------------------- | ----------------- | ----------------- | ----------------- | ---------------------------------- |
-| **Open-source**     | 🚫 Proprietary    | ✅ MIT            | ✅ MIT            | ✅ GNU                             |
-| **Simple to start** | ✅ Desktop + CLI  | ⚠️ Terminal-first | ⚠️ Terminal-first | ✅ Clean UI, minutes               |
-| **Cost**            | ⚠️ Sub + add-ons  | ⚠️ BYO models     | ⚠️ BYO models     | ✅ One sub + TokenJuice            |
-| **Memory**          | ✅ Chat-scoped    | ⚠️ Plugin-reliant | ✅ Self-learning  | 🚀 Memory Tree + Obsidian vault, optional [agentmemory](https://github.com/rohitg00/agentmemory) backend |
-| **Integrations**    | ⚠️ Few connectors | ⚠️ BYO            | ⚠️ BYO            | 🚀 118+ via OAuth                  |
-| **Auto-fetch**      | 🚫 None           | 🚫 None           | 🚫 None           | ✅ 20-min sync into memory         |
-| **API sprawl**      | 🚫 Extra keys     | 🚫 BYOK           | 🚫 Multi-vendor   | ✅ One account                     |
-| **Model routing**   | 🚫 Single model   | ⚠️ Manual         | ⚠️ Manual         | ✅ Built-in                        |
-| **Native tools**    | ✅ Code-only      | ✅ Code-only      | ✅ Code-only      | ✅ Code + search + scraper + voice |
-
-# Star us on GitHub
-
-_Building toward AGI and artificial consciousness? Star the repo and help others find the path._
-
-<p align="center">
- <a href="https://www.star-history.com/#tinyhumansai/openhuman&type=date&legend=top-left">
- <picture>
- <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tinyhumansai/openhuman&type=date&theme=dark&legend=top-left" />
- <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tinyhumansai/openhuman&type=date&legend=top-left" />
- <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=tinyhumansai/openhuman&type=date&legend=top-left" />
- </picture>
- </a>
-</p>
-
-# Contributors Hall of Fame
-
-Show some love and end up in the hall of fame. Contributors get free merch and special access to our [Discord](https://discord.tinyhumans.ai/).
-
-<a href="https://github.com/tinyhumansai/openhuman/graphs/contributors">
- <img src="https://contrib.rocks/image?repo=tinyhumansai/openhuman" alt="OpenHuman contributors" />
-</a>
+[GNU GPL v3](./LICENSE) — same as upstream.
