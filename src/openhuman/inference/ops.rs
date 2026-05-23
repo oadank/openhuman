@@ -1,14 +1,14 @@
 //! JSON-RPC controller surface for inference operations.
 
-use crate::openhuman::config::Config;
 use crate::openhuman::config::rpc as config_rpc;
+use crate::openhuman::config::Config;
 use crate::openhuman::inference::local as local_runtime;
 use crate::openhuman::inference::local::ops::{LocalAiChatMessage, ReactionDecision};
 use crate::openhuman::inference::provider as providers;
+use crate::openhuman::inference::{device, presets, sentiment, SentimentResult};
 use crate::openhuman::inference::{LocalAiEmbeddingResult, LocalAiStatus};
-use crate::openhuman::inference::{SentimentResult, device, presets, sentiment};
 use crate::rpc::RpcOutcome;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tracing::{debug, error};
 
 const LOG_PREFIX: &str = "[inference::ops]";

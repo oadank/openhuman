@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::core::all::{ControllerFuture, RegisteredController};

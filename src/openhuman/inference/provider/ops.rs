@@ -1123,8 +1123,8 @@ mod tests {
         // passes a slug instead of the opaque random id. This lets the frontend
         // call the RPC before the provider config has been persisted (where only
         // the slug is stable).
-        use crate::openhuman::config::Config;
         use crate::openhuman::config::schema::cloud_providers::{AuthStyle, CloudProviderCreds};
+        use crate::openhuman::config::Config;
 
         let mut config = Config::default();
         config.cloud_providers.push(CloudProviderCreds {

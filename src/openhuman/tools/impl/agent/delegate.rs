@@ -1,11 +1,11 @@
 use crate::openhuman::config::{Config, DelegateAgentConfig};
 use crate::openhuman::inference::provider::factory::create_chat_provider_from_string;
 use crate::openhuman::inference::provider::{
-    INFERENCE_BACKEND_ID, Provider, ProviderRuntimeOptions, create_backend_inference_provider,
-    create_chat_provider,
+    create_backend_inference_provider, create_chat_provider, Provider, ProviderRuntimeOptions,
+    INFERENCE_BACKEND_ID,
 };
-use crate::openhuman::security::SecurityPolicy;
 use crate::openhuman::security::policy::ToolOperation;
+use crate::openhuman::security::SecurityPolicy;
 use crate::openhuman::tool_timeout::tool_execution_timeout_secs;
 use crate::openhuman::tools::traits::{Tool, ToolResult};
 use async_trait::async_trait;
@@ -214,46 +214,45 @@ impl Tool for DelegateTool {
             return Ok(ToolResult::error(error));
         }
 
-        let (provider, resolved_model): (Box<dyn Provider>, String) = if let Some(root_config) =
-            self.root_config.as_ref()
-        {
-            let model_pin = agent_config.model.trim();
-            let full_provider_string = delegate_model_is_provider_ref(model_pin, root_config);
-            let resolved = if full_provider_string {
-                create_chat_provider_from_string("agentic", model_pin, root_config)
+        let (provider, resolved_model): (Box<dyn Provider>, String) =
+            if let Some(root_config) = self.root_config.as_ref() {
+                let model_pin = agent_config.model.trim();
+                let full_provider_string = delegate_model_is_provider_ref(model_pin, root_config);
+                let resolved = if full_provider_string {
+                    create_chat_provider_from_string("agentic", model_pin, root_config)
+                } else {
+                    create_chat_provider("agentic", root_config).map(|(provider, routed_model)| {
+                        let model = if model_pin.is_empty() {
+                            routed_model
+                        } else {
+                            model_pin.to_string()
+                        };
+                        (provider, model)
+                    })
+                };
+                match resolved {
+                    Ok((p, model)) => (p, model),
+                    Err(e) => {
+                        return Ok(ToolResult::error(format!(
+                        "Failed to create inference client for delegate agent '{agent_name}': {e}"
+                    )));
+                    }
+                }
             } else {
-                create_chat_provider("agentic", root_config).map(|(provider, routed_model)| {
-                    let model = if model_pin.is_empty() {
-                        routed_model
-                    } else {
-                        model_pin.to_string()
-                    };
-                    (provider, model)
-                })
+                match create_backend_inference_provider(
+                    None,
+                    None,
+                    None,
+                    &self.provider_runtime_options,
+                ) {
+                    Ok(p) => (p, agent_config.model.clone()),
+                    Err(e) => {
+                        return Ok(ToolResult::error(format!(
+                        "Failed to create inference client for delegate agent '{agent_name}': {e}"
+                    )));
+                    }
+                }
             };
-            match resolved {
-                Ok((p, model)) => (p, model),
-                Err(e) => {
-                    return Ok(ToolResult::error(format!(
-                        "Failed to create inference client for delegate agent '{agent_name}': {e}"
-                    )));
-                }
-            }
-        } else {
-            match create_backend_inference_provider(
-                None,
-                None,
-                None,
-                &self.provider_runtime_options,
-            ) {
-                Ok(p) => (p, agent_config.model.clone()),
-                Err(e) => {
-                    return Ok(ToolResult::error(format!(
-                        "Failed to create inference client for delegate agent '{agent_name}': {e}"
-                    )));
-                }
-            }
-        };
 
         // Build the message
         let full_prompt = if context.is_empty() {
