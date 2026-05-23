@@ -2246,9 +2246,6 @@ const CloudProviderEditor = ({
     try {
       const models = await listModelsRaw(ep, apiKey.trim());
       setModelList(models);
-      if (models.length > 0 && !defaultModel) {
-        setDefaultModel(models[0].id);
-      }
     } catch (err) {
       setModelListError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2355,29 +2352,23 @@ const CloudProviderEditor = ({
                 {modelListError}
               </p>
             )}
-            {modelList.length > 0 ? (
-              <select
-                value={defaultModel}
-                onChange={e => setDefaultModel(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200">
-                {!defaultModel && <option value="">Select a model…</option>}
-                {defaultModel && !modelList.some(m => m.id === defaultModel) && (
-                  <option value={defaultModel}>{defaultModel}</option>
-                )}
-                {modelList.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.id}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                value={defaultModel}
-                onChange={e => setDefaultModel(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 placeholder:text-stone-400 dark:placeholder:text-neutral-500 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
-                placeholder="e.g. gpt-4o, claude-sonnet-4-6"
-              />
+            {modelList.length > 0 && (
+              <p className="mt-1 text-[11px] text-stone-500 dark:text-neutral-400">
+                {modelList.length} model{modelList.length !== 1 ? 's' : ''} fetched — type or select below
+              </p>
             )}
+            <datalist id="editor-model-list">
+              {modelList.map(m => (
+                <option key={m.id} value={m.id} />
+              ))}
+            </datalist>
+            <input
+              list="editor-model-list"
+              value={defaultModel}
+              onChange={e => setDefaultModel(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-stone-900 dark:text-neutral-100 placeholder:text-stone-400 dark:placeholder:text-neutral-500 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
+              placeholder="e.g. gpt-4o, claude-sonnet-4-6"
+            />
           </div>
           {!isOpenHuman && (
             <div>
