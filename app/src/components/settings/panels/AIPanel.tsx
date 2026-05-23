@@ -324,12 +324,14 @@ function useAISettings() {
 
   const isDirty = JSON.stringify(saved) !== JSON.stringify(draft);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (explicitNext?: AISettings) => {
+    const nextDraft = explicitNext ?? draft;
     try {
       const prevApi = toApiSettings(saved);
-      const nextApi = toApiSettings(draft);
+      const nextApi = toApiSettings(nextDraft);
       await saveAISettings(prevApi, nextApi);
-      setSaved(draft);
+      setSaved(nextDraft);
+      if (explicitNext) setDraft(explicitNext);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save AI settings';
       setError(message);
@@ -2081,7 +2083,10 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
                 defaultModel
                   ? ({ kind: 'cloud', providerSlug: upserted.slug, model: defaultModel } as const)
                   : draft.chatDefault;
-              setDraft({ ...draft, cloudProviders: list, chatDefault });
+              const nextDraft = { ...draft, cloudProviders: list, chatDefault };
+              // Auto-save immediately so routing + default_model reach the
+              // core without requiring a separate Save bar click.
+              await save(nextDraft);
               setEditing(null);
             } finally {
               setBusyAction(null);
