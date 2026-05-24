@@ -94,8 +94,8 @@ impl Default for ChannelsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum StreamMode {
-    #[default]
     Off,
+    #[default]
     Partial,
 }
 
