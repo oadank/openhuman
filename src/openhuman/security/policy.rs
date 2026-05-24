@@ -103,50 +103,38 @@ pub struct SecurityPolicy {
 impl Default for SecurityPolicy {
     fn default() -> Self {
         Self {
-            autonomy: AutonomyLevel::Supervised,
+            autonomy: AutonomyLevel::Full,
             workspace_dir: PathBuf::from("."),
-            workspace_only: true,
+            workspace_only: false,
             allowed_commands: vec![
-                "git".into(),
-                "npm".into(),
-                "cargo".into(),
-                "ls".into(),
-                "cat".into(),
-                "grep".into(),
-                "find".into(),
-                "echo".into(),
-                "pwd".into(),
-                "wc".into(),
-                "head".into(),
-                "tail".into(),
-                "date".into(),
-            ],
-            forbidden_paths: vec![
-                // System directories (blocked even when workspace_only=false)
-                "/etc".into(),
-                "/root".into(),
-                "/home".into(),
-                "/usr".into(),
-                "/bin".into(),
-                "/sbin".into(),
-                "/lib".into(),
-                "/opt".into(),
-                "/boot".into(),
-                "/dev".into(),
-                "/proc".into(),
-                "/sys".into(),
-                "/var".into(),
-                "/tmp".into(),
-                // Sensitive dotfiles
-                "~/.ssh".into(),
-                "~/.gnupg".into(),
-                "~/.aws".into(),
-                "~/.config".into(),
-            ],
-            max_actions_per_hour: 20,
-            max_cost_per_day_cents: 500,
-            require_approval_for_medium_risk: true,
-            block_high_risk_commands: true,
+                // 开发工具
+                "git", "npm", "cargo", "pnpm", "yarn", "node", "python", "python3", "pip", "pip3",
+                "go", "rustc", "make", "cmake", "gcc", "g++", "clang", "clang++",
+                // 文件操作
+                "ls", "cat", "grep", "find", "echo", "pwd", "wc", "head", "tail", "date",
+                "mkdir", "rmdir", "cp", "mv", "rm", "touch", "chmod", "chown", "ln",
+                "sed", "awk", "sort", "uniq", "diff", "patch", "tr", "cut", "xargs", "tee",
+                // 命令行工具
+                "bash", "sh", "zsh", "vim", "nvim", "nano", "less", "more", "man",
+                // 系统工具
+                "ps", "top", "htop", "kill", "pkill", "pgrep", "lsof", "ss", "netstat",
+                "free", "df", "du", "uptime", "which", "whereis", "env",
+                // 网络
+                "curl", "wget", "ping", "traceroute", "dig", "nslookup", "ssh", "scp", "rsync",
+                // 压缩
+                "tar", "gzip", "gunzip", "zip", "unzip",
+                // OpenHuman 相关
+                "openhuman", "openhuman-core", "openclaw", "litellm", "multica", "agents-to-im",
+                // 其他
+                "jq", "yq", "base64", "md5sum", "sha256sum",
+                "ffmpeg", "ffprobe", "pandoc", "sqlite3", "redis-cli", "mysql", "psql",
+                "systemctl", "journalctl", "crontab", "tmux", "screen", "nohup",
+            ].into_iter().map(|s| s.into()).collect(),
+            forbidden_paths: vec![],  // 不禁止任何路径
+            max_actions_per_hour: 200,
+            max_cost_per_day_cents: 50000,
+            require_approval_for_medium_risk: false,
+            block_high_risk_commands: false,
             tracker: ActionTracker::new(),
         }
     }
