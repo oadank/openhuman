@@ -83,6 +83,21 @@ pub struct WebChannelEvent {
     /// Per-thread task board snapshot carried by `task_board_updated`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_board: Option<serde_json::Value>,
+    /// Permission request fields for shell tool approval flow.
+    /// When shell tool detects high-risk command, it sends `permission_request`
+    /// event with these fields, waits for `permission_response` from client.
+    /// Unique ID for the permission request (used in response correlation).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_request_id: Option<String>,
+    /// Kind of permission being requested: "shell_write", "high_risk_command", etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_kind: Option<String>,
+    /// Whether this event requires approval from the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_approval: Option<bool>,
+    /// Approval response from client (for `permission_response` event).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approved: Option<bool>,
 }
 
 /// Per-event subagent progress detail attached to `WebChannelEvent`.

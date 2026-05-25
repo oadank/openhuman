@@ -412,6 +412,7 @@ pub async fn start_chat(
                 citations: None,
                 subagent: None,
                 task_board: None,
+                ..Default::default()
             });
         }
     }
@@ -528,6 +529,7 @@ pub async fn start_chat(
                     citations: None,
                     subagent: None,
                     task_board: None,
+                    ..Default::default()
                 });
             }
         }
@@ -635,6 +637,7 @@ pub async fn cancel_chat(client_id: &str, thread_id: &str) -> Result<Option<Stri
             citations: None,
             subagent: None,
             task_board: None,
+            ..Default::default()
         });
     }
 
@@ -998,6 +1001,7 @@ fn spawn_progress_bridge(
                         citations: None,
                         subagent: None,
                         task_board: None,
+                        ..Default::default()
                     });
                 }
                 AgentProgress::IterationStarted {
@@ -1028,6 +1032,7 @@ fn spawn_progress_bridge(
                         citations: None,
                         subagent: None,
                         task_board: None,
+                        ..Default::default()
                     });
                 }
                 AgentProgress::ToolCallStarted {

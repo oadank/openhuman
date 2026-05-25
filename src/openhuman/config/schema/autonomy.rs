@@ -11,7 +11,7 @@ pub struct AutonomyConfig {
     // No field-level override needed — AutonomyLevel's #[default] is Supervised,
     // matching the struct Default.
     pub level: AutonomyLevel,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_false")]
     pub workspace_only: bool,
     #[serde(default = "default_allowed_commands")]
     pub allowed_commands: Vec<String>,

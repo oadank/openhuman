@@ -628,25 +628,24 @@ impl SecurityPolicy {
     }
 
     /// Validate full command execution policy (allowlist + risk gate).
+    /// When command is blocked by allowlist (e.g. output redirection),
+    /// returns PERMISSION_REQUIRED error to trigger approval flow in bridge.
     pub fn validate_command_execution(
         &self,
         command: &str,
         approved: bool,
     ) -> Result<CommandRiskLevel, String> {
         if !self.is_command_allowed(command) {
-            // Truncate the command in BOTH the log and the Err return: the Err
-            // string is bubbled back to the frontend, and a full untruncated
-            // command can leak secrets in args (e.g. `curl -H "Authorization:
-            // Bearer …"`, `psql "postgres://user:pass@…"`). The 80-char cap
-            // matches the log truncation so a long base command with safe args
-            // still shows enough context to diagnose the block.
+            // Command blocked by allowlist (e.g. output redirection `>`).
+            // Return PERMISSION_REQUIRED to trigger approval flow.
             let truncated = &command[..floor_char_boundary(command, 80)];
-            log::warn!(
-                "[openhuman:policy] Command blocked by allowlist: {}",
+            log::info!(
+                "[openhuman:policy] Command needs permission approval: {}",
                 truncated
             );
             return Err(format!(
-                "Command not allowed by security policy: {truncated}"
+                "PERMISSION_REQUIRED:shell:{}",
+                truncated
             ));
         }
 

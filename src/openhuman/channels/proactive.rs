@@ -141,6 +141,7 @@ impl EventHandler for ProactiveMessageSubscriber {
             citations: None,
             subagent: None,
             task_board: None,
+            ..Default::default()
         });
 
         // 2. If an active external channel is configured, deliver there too.

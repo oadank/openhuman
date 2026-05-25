@@ -84,6 +84,7 @@ pub async fn deliver_response(
             } else {
                 Some(serde_json::json!(citations))
             },
+            ..Default::default()
         });
         return;
     }
@@ -125,6 +126,7 @@ pub async fn deliver_response(
             } else {
                 None
             },
+            ..Default::default()
         });
     }
 
@@ -156,6 +158,7 @@ pub async fn deliver_response(
         } else {
             Some(serde_json::json!(citations))
         },
+        ..Default::default()
     });
 }
 
