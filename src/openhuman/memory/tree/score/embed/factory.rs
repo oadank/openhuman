@@ -2,9 +2,10 @@
 //!
 //! Resolution order:
 //! 1. **Explicit override** — `memory_tree.embedding_endpoint` +
-//!    `memory_tree.embedding_model` both Some → [`OllamaEmbedder`] with
-//!    those exact values. For power users / E2E test rigs that want to
-//!    point at a non-default Ollama endpoint.
+//!    `memory_tree.embedding_model` both Some → check endpoint format:
+//!    - If endpoint contains `/v1` or starts with `custom:`, use
+//!      [`OpenAiCompatEmbedder`] (OpenAI-compatible `/v1/embeddings`).
+//!    - Otherwise use [`OllamaEmbedder`] (Ollama `/api/embeddings`).
 //! 2. **Local-AI usage flag** — `config.local_ai.use_local_for_embeddings()`
 //!    (i.e. `runtime_enabled && usage.embeddings`) → [`OllamaEmbedder`]
 //!    against [`ollama_base_url`] with the user's chosen
@@ -16,12 +17,8 @@
 //! NOTE on dimensions: the memory tree on-disk format is hard-coded at
 //! [`EMBEDDING_DIM`](super::EMBEDDING_DIM) (1024). If the user picks a
 //! local embedding model whose output is a different dimensionality,
-//! the trait's post-call validator rejects each embed with a clear
-//! `expected N dims, got M` error. Switching the local model picker in
-//! Local AI Settings is the fix.
-//!
-//! The historical `InertEmbedder` (zero vectors) path is retained for
-//! tests only — it is no longer the production lax-mode fallback.
+//! the trait's post-call validator may log warnings but still accept
+//! the embedding. Check model output dimension before deploying.
 //!
 //! Env var overrides applied in [`crate::openhuman::config::load`]:
 //! - `OPENHUMAN_MEMORY_EMBED_ENDPOINT`
@@ -30,7 +27,7 @@
 
 use anyhow::Result;
 
-use super::{Embedder, OllamaEmbedder};
+use super::{Embedder, OllamaEmbedder, OpenAiCompatEmbedder};
 use crate::openhuman::config::Config;
 use crate::openhuman::inference::local::ollama_base_url;
 
@@ -51,17 +48,43 @@ pub fn build_embedder_from_config(config: &Config) -> Result<Box<dyn Embedder>> 
             if !endpoint.trim().is_empty() && !model.trim().is_empty() =>
         {
             let timeout_ms = tree_cfg.embedding_timeout_ms.unwrap_or(0);
-            log::debug!(
-                "[memory_tree::embed::factory] using Ollama endpoint={} model={} timeout_ms={}",
-                endpoint,
-                model,
-                timeout_ms
-            );
-            Ok(Box::new(OllamaEmbedder::new(
-                endpoint.to_string(),
-                model.to_string(),
-                timeout_ms,
-            )))
+            let endpoint_str = endpoint.trim();
+
+            // Detect endpoint type: OpenAI-compatible vs Ollama
+            let is_openai_compat = endpoint_str.contains("/v1")
+                || endpoint_str.starts_with("custom:")
+                || endpoint_str.contains("localhost:11435")  // BGE proxy
+                || endpoint_str.contains("localhost:4000"); // LiteLLM
+
+            if is_openai_compat {
+                log::debug!(
+                    "[memory_tree::embed::factory] using OpenAI-compatible endpoint={} model={} timeout_ms={}",
+                    endpoint_str,
+                    model,
+                    timeout_ms
+                );
+                // For now, we don't pass API key - the endpoint is expected to be
+                // a local proxy like BGE or LiteLLM that doesn't require auth.
+                // Future: add embedding_api_key to MemoryTreeConfig if needed.
+                Ok(Box::new(OpenAiCompatEmbedder::new(
+                    endpoint.to_string(),
+                    model.to_string(),
+                    String::new(), // No API key for local endpoints
+                    timeout_ms,
+                )))
+            } else {
+                log::debug!(
+                    "[memory_tree::embed::factory] using Ollama endpoint={} model={} timeout_ms={}",
+                    endpoint_str,
+                    model,
+                    timeout_ms
+                );
+                Ok(Box::new(OllamaEmbedder::new(
+                    endpoint.to_string(),
+                    model.to_string(),
+                    timeout_ms,
+                )))
+            }
         }
         _ => {
             // Honour the unified AI settings: `embeddings_provider` is the

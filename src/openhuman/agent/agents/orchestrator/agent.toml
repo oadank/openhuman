@@ -91,6 +91,14 @@ hint = "chat"
 # the orchestrator never calls composio_authorize / composio_list_tools
 # / composio_execute directly.
 named = [
+    "shell",
+    "glob",
+    "list",
+    "grep",
+    "file_read",
+    "file_write",
+    "edit_file",
+    "apply_patch",
     "query_memory",
     "memory_store",
     "memory_forget",

@@ -32,18 +32,23 @@ use async_trait::async_trait;
 pub mod factory;
 pub mod inert;
 pub mod ollama;
+pub mod openai_compat;
 
 pub use factory::build_embedder_from_config;
 pub use inert::InertEmbedder;
 pub use ollama::OllamaEmbedder;
+pub use openai_compat::OpenAiCompatEmbedder;
 
 /// Embedding dimensionality used across the memory tree.
 ///
-/// Hard-coded to match `bge-m3`; swapping providers requires a matching
-/// dimension or the trait's post-call validation will bail. Any change
-/// to this constant breaks on-disk compatibility with existing
-/// `mem_tree_chunks.embedding` / `mem_tree_summaries.embedding` blobs.
-pub const EMBEDDING_DIM: usize = 1024;
+/// Configurable based on the embedding model:
+/// - bge-small-zh-v1.5: 512 dims (current default for BGE proxy)
+/// - bge-m3: 1024 dims
+/// - text-embedding-3-small: 1536 dims
+///
+/// Change this constant when switching models. Breaks on-disk compatibility
+/// with existing `mem_tree_chunks.embedding` / `mem_tree_summaries.embedding` blobs.
+pub const EMBEDDING_DIM: usize = 512;
 
 /// Trait backing all Phase 4 embedders. Implementations MUST produce
 /// exactly [`EMBEDDING_DIM`] floats per call — callers that persist the

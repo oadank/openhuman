@@ -388,7 +388,10 @@ pub(crate) fn parse_tool_calls(response: &str) -> (String, Vec<ParsedToolCall>) 
             }
 
             if !parsed_any {
-                tracing::warn!("Malformed <tool_call> JSON: expected tool-call object in tag body");
+                tracing::warn!(
+                    "Malformed <tool_call> JSON: expected tool-call object in tag body. inner=[{}]",
+                    inner.chars().take(500).collect::<String>()
+                );
             }
 
             remaining = &after_open[close_idx + close_tag.len()..];
