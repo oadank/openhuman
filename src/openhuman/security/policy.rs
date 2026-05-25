@@ -643,10 +643,7 @@ impl SecurityPolicy {
                 "[openhuman:policy] Command needs permission approval: {}",
                 truncated
             );
-            return Err(format!(
-                "PERMISSION_REQUIRED:shell:{}",
-                truncated
-            ));
+            return Err(format!("PERMISSION_REQUIRED:shell:{}", truncated));
         }
 
         let risk = self.command_risk_level(command);

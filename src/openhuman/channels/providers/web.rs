@@ -1076,7 +1076,7 @@ fn spawn_progress_bridge(
                                 "output_preview": output_preview,
                                 "elapsed_ms": elapsed_ms
                             })
-                                .to_string(),
+                            .to_string(),
                         ),
                         success: Some(success),
                         round: Some(iteration),
