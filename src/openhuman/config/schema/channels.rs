@@ -286,6 +286,10 @@ pub struct LarkConfig {
     pub receive_mode: LarkReceiveMode,
     #[serde(default)]
     pub port: Option<u16>,
+    #[serde(default)]
+    pub stream_mode: StreamMode,
+    #[serde(default = "default_draft_update_interval_ms")]
+    pub draft_update_interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]

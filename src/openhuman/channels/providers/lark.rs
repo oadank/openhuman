@@ -1,6 +1,8 @@
 use crate::openhuman::channels::traits::{Channel, ChannelMessage, SendMessage};
+use crate::openhuman::config::schema::{LarkReceiveMode, StreamMode};
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -147,11 +149,17 @@ pub struct LarkChannel {
     /// When true, use Feishu (CN) endpoints; when false, use Lark (international).
     use_feishu: bool,
     /// How to receive events: WebSocket long-connection or HTTP webhook.
-    receive_mode: crate::openhuman::config::schema::LarkReceiveMode,
+    receive_mode: LarkReceiveMode,
     /// Cached tenant access token
     tenant_token: Arc<RwLock<Option<String>>>,
     /// Dedup set: WS message_ids seen in last ~30 min to prevent double-dispatch
     ws_seen_ids: Arc<RwLock<HashMap<String, Instant>>>,
+    /// Stream mode for draft updates (partial = live edits, off = send at end)
+    stream_mode: StreamMode,
+    /// Minimum interval between draft edits (ms) to avoid API rate limits
+    draft_update_interval_ms: u64,
+    /// Rate-limit tracking for draft edits per chat
+    last_draft_edit: Mutex<HashMap<String, Instant>>,
 }
 
 impl LarkChannel {
@@ -169,9 +177,12 @@ impl LarkChannel {
             port,
             allowed_users,
             use_feishu: true,
-            receive_mode: crate::openhuman::config::schema::LarkReceiveMode::default(),
+            receive_mode: LarkReceiveMode::default(),
             tenant_token: Arc::new(RwLock::new(None)),
             ws_seen_ids: Arc::new(RwLock::new(HashMap::new())),
+            stream_mode: StreamMode::default(),
+            draft_update_interval_ms: 1000,
+            last_draft_edit: Mutex::new(HashMap::new()),
         }
     }
 
@@ -186,6 +197,8 @@ impl LarkChannel {
         );
         ch.use_feishu = config.use_feishu;
         ch.receive_mode = config.receive_mode.clone();
+        ch.stream_mode = config.stream_mode;
+        ch.draft_update_interval_ms = config.draft_update_interval_ms;
         ch
     }
 
@@ -215,6 +228,10 @@ impl LarkChannel {
 
     fn send_message_url(&self) -> String {
         format!("{}/im/v1/messages?receive_id_type=chat_id", self.api_base())
+    }
+
+    fn edit_message_url(&self, message_id: &str) -> String {
+        format!("{}/im/v1/messages/{message_id}", self.api_base())
     }
 
     /// POST /callback/ws/endpoint → (wss_url, client_config)
@@ -707,6 +724,140 @@ impl Channel for LarkChannel {
 
     async fn health_check(&self) -> bool {
         self.get_tenant_access_token().await.is_ok()
+    }
+
+    fn supports_draft_updates(&self) -> bool {
+        self.stream_mode != StreamMode::Off
+    }
+
+    async fn send_draft(&self, message: &SendMessage) -> anyhow::Result<Option<String>> {
+        if self.stream_mode == StreamMode::Off {
+            return Ok(None);
+        }
+
+        let token = self.get_tenant_access_token().await?;
+        let url = self.send_message_url();
+
+        let initial_text = if message.content.is_empty() {
+            "..."
+        } else {
+            &message.content
+        };
+
+        let content = serde_json::json!({ "text": initial_text }).to_string();
+        let body = serde_json::json!({
+            "receive_id": message.recipient,
+            "msg_type": "text",
+            "content": content,
+        });
+
+        let resp = self
+            .http_client()
+            .post(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .json(&body)
+            .send()
+            .await?;
+
+        if resp.status().as_u16() == 401 {
+            self.invalidate_token().await;
+            let new_token = self.get_tenant_access_token().await?;
+            let retry_resp = self
+                .http_client()
+                .post(&url)
+                .header("Authorization", format!("Bearer {new_token}"))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .json(&body)
+                .send()
+                .await?;
+
+            if !retry_resp.status().is_success() {
+                let err = retry_resp.text().await.unwrap_or_default();
+                tracing::warn!("Lark send_draft failed after token refresh: {err}");
+                return Ok(None);
+            }
+
+            let resp_json: serde_json::Value = retry_resp.json().await?;
+            let message_id = resp_json
+                .get("data")
+                .and_then(|d| d.get("message_id"))
+                .and_then(|id| id.as_str())
+                .map(|s| s.to_string());
+
+            self.last_draft_edit
+                .lock()
+                .insert(message.recipient.clone(), Instant::now());
+
+            return Ok(message_id);
+        }
+
+        if !resp.status().is_success() {
+            let err = resp.text().await.unwrap_or_default();
+            tracing::warn!("Lark send_draft failed: {err}");
+            return Ok(None);
+        }
+
+        let resp_json: serde_json::Value = resp.json().await?;
+        let message_id = resp_json
+            .get("data")
+            .and_then(|d| d.get("message_id"))
+            .and_then(|id| id.as_str())
+            .map(|s| s.to_string());
+
+        self.last_draft_edit
+            .lock()
+            .insert(message.recipient.clone(), Instant::now());
+
+        Ok(message_id)
+    }
+
+    async fn update_draft(
+        &self,
+        recipient: &str,
+        message_id: &str,
+        text: &str,
+    ) -> anyhow::Result<()> {
+        // Rate-limit edits per chat
+        {
+            let last_edits = self.last_draft_edit.lock();
+            if let Some(last_time) = last_edits.get(recipient) {
+                let elapsed = u64::try_from(last_time.elapsed().as_millis()).unwrap_or(u64::MAX);
+                if elapsed < self.draft_update_interval_ms {
+                    return Ok(());
+                }
+            }
+        }
+
+        let token = self.get_tenant_access_token().await?;
+        let url = self.edit_message_url(message_id);
+
+        // Feishu message edit requires content as JSON string
+        let content = serde_json::json!({ "text": text }).to_string();
+        let body = serde_json::json!({
+            "content": content,
+        });
+
+        let resp = self
+            .http_client()
+            .put(&url)
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json; charset=utf-8")
+            .json(&body)
+            .send()
+            .await?;
+
+        if resp.status().is_success() {
+            self.last_draft_edit
+                .lock()
+                .insert(recipient.to_string(), Instant::now());
+        } else {
+            let status = resp.status();
+            let err = resp.text().await.unwrap_or_default();
+            tracing::debug!("Lark edit message failed ({status}): {err}");
+        }
+
+        Ok(())
     }
 }
 
