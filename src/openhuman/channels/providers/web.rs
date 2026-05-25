@@ -1059,6 +1059,7 @@ fn spawn_progress_bridge(
                     tool_name,
                     success,
                     output_chars,
+                    output_preview,
                     elapsed_ms,
                     iteration,
                 } => {
@@ -1070,7 +1071,11 @@ fn spawn_progress_bridge(
                         tool_name: Some(tool_name),
                         skill_id: Some("web_channel".to_string()),
                         output: Some(
-                            json!({"output_chars": output_chars, "elapsed_ms": elapsed_ms})
+                            json!({
+                                "output_chars": output_chars,
+                                "output_preview": output_preview,
+                                "elapsed_ms": elapsed_ms
+                            })
                                 .to_string(),
                         ),
                         success: Some(success),

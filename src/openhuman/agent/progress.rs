@@ -47,6 +47,9 @@ pub enum AgentProgress {
         tool_name: String,
         success: bool,
         output_chars: usize,
+        /// Preview of output content (truncated to ~500 chars for Socket.IO transport).
+        /// Contains actual error message when `success=false`, useful for permission cards.
+        output_preview: String,
         elapsed_ms: u64,
         /// 1-based iteration index.
         iteration: u32,

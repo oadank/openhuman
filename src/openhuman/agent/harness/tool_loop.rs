@@ -551,6 +551,7 @@ pub(crate) async fn run_tool_call_loop(
                 let call_id = progress_call_id.clone();
                 let tool_name = call.name.clone();
                 let output_chars = message.chars().count();
+                let output_preview = message.chars().take(500).collect::<String>();
                 let iteration_u32 = (iteration + 1) as u32;
                 let sink_opt = on_progress.clone();
                 async move {
@@ -561,6 +562,7 @@ pub(crate) async fn run_tool_call_loop(
                                 tool_name,
                                 success: false,
                                 output_chars,
+                                output_preview,
                                 elapsed_ms: 0,
                                 iteration: iteration_u32,
                             })
@@ -810,6 +812,7 @@ pub(crate) async fn run_tool_call_loop(
                             tool_name: call.name.clone(),
                             success,
                             output_chars: result_text.chars().count(),
+                            output_preview: result_text.chars().take(500).collect::<String>(),
                             elapsed_ms,
                             iteration: (iteration + 1) as u32,
                         })

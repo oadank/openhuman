@@ -51,6 +51,7 @@ fn tool_call_start_and_complete_track_timeline() {
         tool_name: "shell".into(),
         success: true,
         output_chars: 12,
+        output_preview: "test output".into(),
         elapsed_ms: 50,
         iteration: 1,
     });
@@ -122,6 +123,7 @@ fn tool_call_started_reuses_args_delta_placeholder_for_same_call_id() {
         tool_name: "shell".into(),
         success: true,
         output_chars: 1,
+        output_preview: "x".into(),
         elapsed_ms: 5,
         iteration: 1,
     });

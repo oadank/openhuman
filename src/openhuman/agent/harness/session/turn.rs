@@ -1082,6 +1082,7 @@ impl Agent {
             tool_name: call.name.clone(),
             success,
             output_chars: result.chars().count(),
+            output_preview: truncate_with_ellipsis(&result, 500),
             elapsed_ms,
             iteration: (iteration + 1) as u32,
         })
