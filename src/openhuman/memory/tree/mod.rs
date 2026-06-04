@@ -22,6 +22,7 @@
 //! Phases 2-4 (#708 scoring, #709 summary trees, #710 retrieval) build on
 //! top of these chunks without modifying the Phase 1 surface.
 
+pub mod bus;
 pub mod canonicalize;
 pub mod chat;
 pub mod chunker;

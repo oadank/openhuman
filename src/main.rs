@@ -14,6 +14,12 @@ use regex::Regex;
 /// information is redacted before being sent to the server. After setup, it
 /// delegates execution to the core library based on CLI arguments.
 fn main() {
+    // Initialize rustls crypto provider (ring) before any TLS operations
+    // Required for rustls 0.23+ which no longer auto-selects a provider
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Load `.env` before `sentry::init` so a DSN defined only in the dotenv
     // file is visible to the Sentry client at startup. `dotenvy::dotenv()` is
     // a no-op for variables already present in the process environment, and

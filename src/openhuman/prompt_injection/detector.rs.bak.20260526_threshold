@@ -329,10 +329,9 @@ fn analyze_prompt(input: &str) -> (PromptInjectionVerdict, f32, Vec<PromptInject
     }
 
     score = score.min(1.0);
-    // 提高阈值：Review 从 0.45 提到 0.60，避免系统提示词误触发
     let verdict = if score >= 0.70 {
         PromptInjectionVerdict::Block
-    } else if score >= 0.60 {
+    } else if score >= 0.45 {
         PromptInjectionVerdict::Review
     } else {
         PromptInjectionVerdict::Allow

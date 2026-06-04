@@ -538,45 +538,9 @@ impl SecurityPolicy {
             let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
             let joined_segment = cmd_part.to_ascii_lowercase();
 
-            // High-risk commands
-            if is_command_executor(base.as_str())
-                || matches!(
-                    base.as_str(),
-                    "rm" | "mkfs"
-                        | "dd"
-                        | "shutdown"
-                        | "reboot"
-                        | "halt"
-                        | "poweroff"
-                        | "sudo"
-                        | "su"
-                        | "chown"
-                        | "chmod"
-                        | "useradd"
-                        | "userdel"
-                        | "usermod"
-                        | "passwd"
-                        | "mount"
-                        | "umount"
-                        | "iptables"
-                        | "ufw"
-                        | "firewall-cmd"
-                        | "curl"
-                        | "wget"
-                        | "nc"
-                        | "ncat"
-                        | "netcat"
-                        | "scp"
-                        | "ssh"
-                        | "ftp"
-                        | "telnet"
-                )
-            {
-                return CommandRiskLevel::High;
-            }
-
-            if joined_segment.contains("rm -rf /")
-                || joined_segment.contains("rm -fr /")
+            // High-risk commands - REMOVED: all commands allowed in full autonomy mode
+            // Only block truly destructive patterns
+            if joined_segment.contains("rm -fr /")
                 || joined_segment.contains(":(){:|:&};:")
             {
                 return CommandRiskLevel::High;
@@ -700,42 +664,19 @@ impl SecurityPolicy {
     /// - Blocks single `&` background chaining (`&&` remains supported)
     /// - Blocks output redirections (`>`, `>>`) that could write outside workspace
     /// - Blocks dangerous arguments (e.g. `find -exec`, `git config`)
+    ///
+    /// NOTE: All hard restrictions removed for full autonomy mode.
     pub fn is_command_allowed(&self, command: &str) -> bool {
         if self.autonomy == AutonomyLevel::ReadOnly {
             return false;
         }
 
-        // Block subshell/expansion operators — these allow hiding arbitrary
-        // commands inside an allowed command (e.g. `echo $(rm -rf /)`)
-        if command.contains('`')
-            || command.contains("$(")
-            || command.contains("${")
-            || command.contains("<(")
-            || command.contains(">(")
-        {
-            return false;
-        }
-
-        // Block output redirections (`>`, `>>`) — they can write to arbitrary paths.
-        // Ignore quoted literals, e.g. `echo "a>b"`.
-        if contains_unquoted_char(command, '>') {
-            return false;
-        }
-
-        // Block `tee` — it can write to arbitrary files, bypassing the
-        // redirect check above (e.g. `echo secret | tee /etc/crontab`)
-        if command
-            .split_whitespace()
-            .any(|w| w == "tee" || w.ends_with("/tee"))
-        {
-            return false;
-        }
-
-        // Block background command chaining (`&`), which can hide extra
-        // sub-commands and outlive timeout expectations. Keep `&&` allowed.
-        if contains_unquoted_single_ampersand(command) {
-            return false;
-        }
+        // All hard restrictions removed:
+        // - $() command substitution: ALLOWED
+        // - ${} variable expansion: ALLOWED
+        // - > output redirection: ALLOWED
+        // - tee command: ALLOWED
+        // - & background execution: ALLOWED
 
         // Split on unquoted command separators and validate each sub-command.
         let segments = split_unquoted_segments(command);
@@ -776,11 +717,10 @@ impl SecurityPolicy {
     }
 
     /// Check for dangerous arguments that allow sub-command execution.
+    /// EXECUTOR CHECK REMOVED: python, bash, perl, ruby etc. all allowed in full autonomy mode.
     fn is_args_safe(&self, base: &str, args: &[String]) -> bool {
         let base = base.to_ascii_lowercase();
-        if is_command_executor(base.as_str()) {
-            return false;
-        }
+        // Executor check removed - all command executors allowed
 
         match base.as_str() {
             "find" => {

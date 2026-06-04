@@ -49,6 +49,10 @@ pub async fn start_channels(config: Config) -> Result<()> {
     crate::openhuman::memory::conversations::register_conversation_persistence_subscriber(
         config.workspace_dir.clone(),
     );
+    // Memory tree ingest: bridge channel messages to the semantic memory pipeline.
+    // Lark (Feishu) and Telegram conversations are ingested into memory_tree
+    // for semantic search and retrieval.
+    crate::openhuman::memory::tree::bus::register_memory_tree_ingest_subscriber(config.clone());
     crate::openhuman::composio::register_composio_trigger_subscriber();
     // Spawn the per-toolkit provider periodic sync scheduler. This is
     // a thin tokio task that ticks every minute and dispatches into

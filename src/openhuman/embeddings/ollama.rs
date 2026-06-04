@@ -4,10 +4,9 @@
 //! This is the preferred local provider: Ollama handles model management,
 //! quantization, and GPU acceleration (Metal on macOS, CUDA on Linux/Windows).
 //!
-//! Default model: `bge-m3` (1024 dimensions). Aligned with the memory
-//! tree's fixed on-disk format (`EMBEDDING_DIM=1024`) and the cloud
-//! Voyage default (`embedding-v1`, 1024 dims) so embeddings produced by
-//! either path are interchangeable.
+//! Default model: `bge-small-zh-v1.5` (512 dimensions). Aligned with the memory
+//! tree's fixed on-disk format (`EMBEDDING_DIM=512`) and the local BGE service
+//! at port 11435.
 
 use async_trait::async_trait;
 
@@ -16,12 +15,12 @@ use super::EmbeddingProvider;
 /// Default Ollama base URL.
 pub const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
-/// Default embedding model for Ollama. 1024-dim to match the memory
-/// tree's fixed on-disk format and the cloud Voyage default.
-pub const DEFAULT_OLLAMA_MODEL: &str = "bge-m3";
+/// Default embedding model for Ollama. 512-dim to match the memory
+/// tree's fixed on-disk format and the local BGE service.
+pub const DEFAULT_OLLAMA_MODEL: &str = "bge-small-zh-v1.5";
 
-/// Default dimensions for `bge-m3`.
-pub const DEFAULT_OLLAMA_DIMENSIONS: usize = 1024;
+/// Default dimensions for `bge-small-zh-v1.5`.
+pub const DEFAULT_OLLAMA_DIMENSIONS: usize = 512;
 
 /// Embedding provider backed by a local Ollama instance.
 ///
