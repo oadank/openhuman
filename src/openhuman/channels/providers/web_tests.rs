@@ -1,7 +1,7 @@
 use super::{
     all_web_channel_controller_schemas, all_web_channel_registered_controllers, cancel_chat,
-    classify_inference_error, compose_system_prompt_suffix, event_session_id_for,
-    extract_provider_error_detail, generic_inference_error_user_message,
+    classify_inference_error, compose_system_prompt_suffix, concrete_model_override,
+    event_session_id_for, extract_provider_error_detail, generic_inference_error_user_message,
     inference_budget_exceeded_user_message, is_inference_budget_exceeded_error, json_output,
     key_for, locale_reply_directive, normalize_model_override, optional_f64, optional_string,
     provider_role_for_model_override, required_string, schemas,
@@ -363,6 +363,10 @@ fn fingerprint_provider_binding_variants_differ() {
 #[test]
 fn provider_role_override_routes_hint_workloads() {
     assert_eq!(
+        provider_role_for_model_override(Some("reasoning-v1")),
+        "reasoning"
+    );
+    assert_eq!(
         provider_role_for_model_override(Some("hint:agentic")),
         "agentic"
     );
@@ -387,6 +391,23 @@ fn provider_role_override_routes_hint_workloads() {
         "reasoning"
     );
     assert_eq!(provider_role_for_model_override(None), "reasoning");
+}
+
+#[test]
+fn concrete_model_override_drops_abstract_tier_hints() {
+    assert_eq!(concrete_model_override(Some("reasoning-v1")), None);
+    assert_eq!(concrete_model_override(Some("hint:reasoning")), None);
+    assert_eq!(concrete_model_override(Some("agentic-v1")), None);
+    assert_eq!(concrete_model_override(Some("coding-v1")), None);
+    assert_eq!(concrete_model_override(Some("summarization-v1")), None);
+    assert_eq!(
+        concrete_model_override(Some(" openai:gpt-5.4-mini ")),
+        Some("openai:gpt-5.4-mini".to_string())
+    );
+    assert_eq!(
+        concrete_model_override(Some("gpt-5.4-mini")),
+        Some("gpt-5.4-mini".to_string())
+    );
 }
 
 #[test]

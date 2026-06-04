@@ -158,7 +158,10 @@ fn set_primary_cloud(config: &mut Config, stats: &mut MigrationStats) {
 /// All fields are gated on `is_none()` — a partially-migrated config skips
 /// fields that were already set by a previous run or a hand-edit.
 fn derive_workload_providers(config: &mut Config, stats: &mut MigrationStats) {
-    let runtime_on = config.local_ai.runtime_enabled;
+    // The default config keeps `runtime_enabled` true so the local-runtime
+    // settings panel can inspect Ollama when present, but workload routing
+    // must not silently depend on Ollama unless the user explicitly opted in.
+    let runtime_on = config.local_ai.runtime_enabled && config.local_ai.opt_in_confirmed;
     let chat_model = config.local_ai.chat_model_id.clone();
     let embed_model = config.local_ai.embedding_model_id.clone();
 

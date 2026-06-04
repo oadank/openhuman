@@ -230,6 +230,15 @@ fn with_provider_detail(summary: &str, err: &str) -> String {
 
 fn classify_inference_error(err: &str) -> (&'static str, String) {
     let lower = err.to_lowercase();
+    // No provider configured — surface the actionable message directly.
+    if lower.contains("no llm provider configured")
+        || lower.contains("add a provider under settings")
+    {
+        return (
+            "not_configured",
+            "No AI provider configured. Go to Settings → AI to add your API key.".to_string(),
+        );
+    }
     if lower.contains("rate limit") || lower.contains("429") {
         (
             "rate_limited",
@@ -1352,10 +1361,22 @@ fn normalize_model_override(model_override: Option<String>) -> Option<String> {
 
 fn provider_role_for_model_override(model_override: Option<&str>) -> &'static str {
     match model_override.map(str::trim) {
+        Some("hint:reasoning") | Some("reasoning-v1") | Some("reasoning-quick-v1") => "reasoning",
         Some("hint:agentic") | Some("agentic-v1") => "agentic",
         Some("hint:coding") | Some("coding-v1") => "coding",
         Some("hint:summarization") | Some("summarization-v1") => "summarization",
         _ => "reasoning",
+    }
+}
+
+fn concrete_model_override(model_override: Option<&str>) -> Option<String> {
+    let model = model_override?.trim();
+    match model {
+        "hint:reasoning" | "reasoning-v1" | "reasoning-quick-v1" | "hint:agentic"
+        | "agentic-v1" | "hint:coding" | "coding-v1" | "hint:summarization"
+        | "summarization-v1" => None,
+        _ if model.is_empty() => None,
+        _ => Some(model.to_string()),
     }
 }
 
@@ -1370,10 +1391,20 @@ fn build_session_agent(
     locale: Option<&str>,
 ) -> Result<Agent, String> {
     let mut effective = config.clone();
-    if let Some(model) = model_override {
+    let provider_role = provider_role_for_model_override(model_override.as_deref());
+    if let Some(model) = concrete_model_override(model_override.as_deref()) {
+        // Concrete model string — set directly as the session model.
         effective.default_model = Some(model);
+    } else if model_override
+        .as_deref()
+        .is_some_and(|s| !s.trim().is_empty())
+    {
+        // Routing hint (e.g. "hint:agentic", "agentic-v1"): pass the hint
+        // through to default_model so builder.rs:771 can map it to the correct
+        // provider role via create_chat_provider. The hint is never forwarded
+        // to the provider API — the builder resolves it to the concrete model.
+        effective.default_model = model_override.clone();
     }
-    let provider_role = provider_role_for_model_override(effective.default_model.as_deref());
     if let Some(temp) = temperature {
         effective.default_temperature = temp;
     }

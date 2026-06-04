@@ -19,7 +19,11 @@ Once the Tauri window opens:
 
 1. Go to **Settings → AI** → add your OpenAI key under the seeded
    `openai` provider entry.
-2. *(Optional)* Run the loopback OAuth CLI for Google + GitHub if you
+2. *(Optional)* Go to **Settings → Developer Options → Composio Routing
+   (Direct Mode)** and paste your Composio API key for long-tail
+   integrations such as Discord, Slack, Notion, and non-native Gmail
+   actions.
+3. *(Optional)* Run the loopback OAuth CLI for Google + GitHub if you
    want native Gmail/Calendar/Drive/GitHub tool execution.
 
 You can do this entirely from the UI. The CLI flows below are the
@@ -62,6 +66,14 @@ The server exposes port **7788**; the single RPC endpoint is
 `http://<host>:7788/rpc`. The bearer token is written to
 `<workspace>/core.token` inside the container on first start.
 
+The desktop picker accepts either the server origin (`http://<host>:7788`
+or `https://openhuman.example.com`) or the full RPC endpoint
+(`.../rpc`). It normalizes origin-only input to `/rpc`, stores the URL
+and bearer token on the client device, and configures the Tauri host to
+use that remote core. In Cloud mode the embedded in-process core is not
+started; in Local mode the remote URL/token are cleared and the embedded
+core is started on loopback.
+
 ---
 
 ## Running the server (Docker)
@@ -70,6 +82,11 @@ A reference compose file lives at `deploy/node-b/docker-compose.yml` in
 this repo. It defines one service (`openhuman-core`), a named volume
 (`openhuman-workspace` → `/home/openhuman/.openhuman`), and exposes port
 7788.
+
+Bind port 7788 to loopback when a reverse proxy on the same host serves
+HTTPS, or to a reachable private interface when clients connect directly
+over LAN/Tailscale. Do not expose bearer-authenticated HTTP on the public
+internet without TLS in front of it.
 
 **Start the server:**
 
@@ -91,6 +108,11 @@ docker exec openhuman-core cat /home/openhuman/.openhuman/core.token
 3. Enter the server URL, e.g. `http://<host>:7788`, and paste the token.
 4. The app validates the connection and proceeds to `/home`.
 
+Installed release artifacts do not read the repository `.env` files.
+For `.deb`, `.dmg`, `.msi`, or `.AppImage` builds, use the first-launch
+runtime picker (or clear the stored mode and pick again) instead of
+expecting `OPENHUMAN_CORE_RPC_URL` from your dev shell to be present.
+
 **Version sync:** the desktop app and the server image must be on the
 same version — the boot check enforces an exact match. App version is in
 `app/package.json`; server version is baked into the image from
@@ -108,9 +130,28 @@ detect a dead or unreachable core. It returns `ok`, `service`, `probe`,
 `status`, `version`, `pid`, `uptime_seconds`, `checked_at`, `checks`,
 and endpoint hints. `/health/ready` returns the same shape but reports
 whether authenticated JSON-RPC is ready (`checks.rpc_dispatch` and
-`checks.rpc_auth`); use it before enabling a desktop, web, or native
-mobile client session. `/health` remains a backwards-compatible
-liveness alias.
+`checks.rpc_auth`) plus server-runtime readiness signals for capability
+inventory, scheduler registration, provider sync registration, and queue
+backlog visibility. The payload also includes `runtime.scheduler`,
+`runtime.provider_sync`, `runtime.queue_backlog`, and
+`runtime.client_sessions` snapshots so operators can distinguish a live
+process from one that is actually ready for durable work. Use it before
+enabling a desktop, web, or native mobile client session. `/health`
+remains a backwards-compatible liveness alias.
+
+**Create a device-scoped client token:**
+
+```bash
+curl -s http://<host>:7788/rpc \
+  -H "Authorization: Bearer <bootstrap-core-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"openhuman.security_client_sessions_create","params":{"label":"phone"}}'
+```
+
+The returned `token` is shown once. Store that on the client instead of
+the bootstrap `core.token`. Revoke lost devices with
+`openhuman.security_client_sessions_revoke`; provider OAuth/API tokens
+remain server-side in the workspace `AuthService`.
 
 **View logs:**
 
@@ -127,7 +168,7 @@ docker logs openhuman-core
 | **Default LLM** | OpenAI Responses API (`/v1/responses`) with `gpt-5.4` and `reasoning.effort = "medium"`. Set via `DEFAULT_MODEL = "openai:gpt-5.4"`. |
 | **Auth storage** | Encrypted-on-disk `AuthService` (`<workspace>/auth-profiles.json`). |
 | **OAuth providers** | Google + GitHub via the loopback flow (`127.0.0.1:<random>/oauth/callback`). Never touches a third party. |
-| **Composio backend** | Gone. Native dispatch handles 9+ tool slugs (Gmail / Calendar / Drive / GitHub); unknown slugs hard-error with a pointer to `src/openhuman/oauth/native_dispatch.rs`. |
+| **Composio direct mode** | Backend proxy is gone. Composio v3 calls use the user's own API key from `AuthService`; `composio_authorize` lazily creates missing managed auth configs before opening Composio's hosted OAuth URL. Native dispatch still bypasses Composio for covered Gmail / Calendar / Drive / GitHub slugs. |
 | **App login** | Removed. `/` redirects straight to `/home`. |
 
 ---
@@ -162,14 +203,17 @@ CLI is installed.
 pnpm dev:app
 ```
 
-This builds the Rust core in-process, spins up the Tauri shell, and
-opens the desktop window. There is no more sidecar `openhuman-core`
-process — the JSON-RPC server is a tokio task inside the GUI process
-(see `app/src-tauri/src/core_process.rs`).
+This builds the Rust core, spins up the Tauri shell, and opens the
+desktop window. There is no Tauri sidecar `openhuman-core` process. In
+Local mode, the JSON-RPC server is a tokio task inside the GUI process
+(see `app/src-tauri/src/core_process.rs`). In Cloud mode, the Tauri host
+uses the configured remote server and skips the embedded core.
 
-You should land directly on `/home`. If you see a blank screen and a
-spinning loader, that means `CoreStateProvider` is still bootstrapping;
-give it a few seconds.
+On first launch you should see the runtime picker. Choose **Local** for
+the embedded core or **Cloud** for a remote server. Once the boot check
+passes, the app proceeds to `/home`. If you see a blank screen and a
+spinning loader after the picker, `CoreStateProvider` is still
+bootstrapping; give it a few seconds.
 
 ## Step 3 — Configure OpenAI from the UI
 
@@ -197,7 +241,45 @@ cargo build --bin openhuman-core
 
 The key lands in the same encrypted `auth-profiles.json` the UI uses.
 
-## Step 4 — *(Optional)* Connect Google + GitHub natively
+## Step 4 — *(Optional)* Configure Composio direct mode
+
+You only need this if you want the Skills/Integrations cards or the agent
+to use Composio-managed long-tail toolkits. Native Google/GitHub actions
+covered by `src/openhuman/oauth/native_dispatch.rs` can run without
+Composio, but Discord, Slack, Notion, Jira, and other long-tail toolkits
+need a Composio API key.
+
+From the Tauri window:
+
+1. Open **Settings → Developer Options**.
+2. Open **Composio Routing (Direct Mode)**.
+3. Select **Direct (bring your own API key)**.
+4. Paste the API key from your Composio account and click **Save**.
+
+The key lands in the active core's encrypted `AuthService` under
+`provider:composio-direct`: on the server workspace in Cloud mode, or in
+the local workspace in Local mode. It is not written to `config.toml`.
+
+After the key is saved, open the Skills/Integrations grid and click
+**Connect** on a toolkit. The core calls Composio v3 directly. If the
+toolkit has no v3 auth config in your tenant yet, the core creates a
+managed auth config first and then opens Composio's hosted OAuth URL. The
+old v2 fallback returns HTTP 410 and is only kept for compatibility with
+older error paths; a fresh direct-mode connection should not require any
+manual "create auth config" dashboard step.
+
+For real-time triggers, also open **Settings → Developer Options →
+Composio Triggers (Direct Mode)** and configure:
+
+- ngrok static domain, e.g. `abc-123.ngrok-free.dev`
+- ngrok authtoken
+- local receiver enabled
+
+The receiver HMAC-verifies Composio's v3 webhook envelope and publishes
+`DomainEvent::ComposioTriggerReceived` into the same triage/reactor
+pipeline as the rest of the agent runtime.
+
+## Step 5 — *(Optional)* Connect Google + GitHub natively
 
 You only need this if you want the agent to call Gmail / Calendar /
 Drive / GitHub tools. Without it, the LLM still works fine for plain
@@ -234,10 +316,14 @@ re-auth until the provider revokes the refresh token (Google unverified
 apps: ~7 days; GitHub: indefinite for classic OAuth, otherwise per the
 expiring-OAuth-App policy).
 
-The 9 native tool slugs available without ever touching a third party:
+Native tool slugs available without ever touching the deleted OpenHuman
+backend:
 
-- **Gmail**: `GMAIL_SEND_EMAIL`, `GMAIL_FETCH_EMAILS`,
-  `GMAIL_DELETE_EMAIL`, `GMAIL_ADD_LABEL_TO_EMAIL`
+- **Gmail**: `GMAIL_SEND_EMAIL`, `GMAIL_FETCH_EMAILS` /
+  `GMAIL_LIST_MESSAGES`, `GMAIL_LIST_LABELS`,
+  `GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID`, `GMAIL_DELETE_EMAIL` /
+  `GMAIL_DELETE_MESSAGE`, `GMAIL_MOVE_TO_TRASH` /
+  `GMAIL_TRASH_EMAIL`, `GMAIL_ADD_LABEL_TO_EMAIL`
 - **Calendar**: `GOOGLECALENDAR_EVENTS_LIST` /
   `GOOGLECALENDAR_FIND_EVENT`, `GOOGLECALENDAR_EVENTS_GET`,
   `GOOGLECALENDAR_CREATE_EVENT`
@@ -252,18 +338,21 @@ Adding more slugs is a single-arm change in
 `src/openhuman/oauth/native_dispatch.rs` plus a typed function in
 `src/openhuman/providers_native/`.
 
-## Step 5 — Smoke-test
+## Step 6 — Smoke-test
 
 From the Tauri window:
 
 - Open the chat panel and send "hi" — confirm the response comes back.
-- *(If you did Step 4)* ask the agent to "list my next 3 calendar
+- *(If you did Step 4)* connect a Composio-backed toolkit such as Discord
+  or Gmail from the Skills/Integrations grid. Expected: a hosted Composio
+  OAuth URL opens; the core logs `openhuman.composio_authorize -> ok`.
+- *(If you did Step 5)* ask the agent to "list my next 3 calendar
   events" or "create a GitHub issue in `<owner>/<repo>` titled foo" —
   confirm it executes via native dispatch (logs prefixed
   `[bearer]` / `[oauth]` in `target/debug-logs/`).
 - Try an unwired slug (e.g. `NOTION_SEARCH`) — confirm the agent
-  surfaces the `"no native dispatcher"` error verbatim rather than
-  silently hitting any backend.
+  routes through Composio direct mode when a Composio API key is present,
+  or surfaces a clear missing-Composio-key error when it is not.
 
 ---
 
@@ -301,12 +390,23 @@ has access to (e.g. `"openai:gpt-5"`, `"openai:gpt-4.1"`), rebuild, and
 restart. The reasoning-effort field auto-skips for non-reasoning
 families.
 
+### "[composio-direct] authorize failed: No auth config found"
+
+That message means you are running an older core. Current direct mode
+creates a managed v3 auth config lazily when a toolkit such as Gmail or
+Discord has none in your Composio tenant, then requests the hosted connect
+URL. Rebuild/restart the desktop or server core and try the connection
+again. If the message changes to `auth config create failed`, Composio
+rejected the API key or toolkit slug; check **Settings → Developer
+Options → Composio Routing (Direct Mode)** and verify the key still works
+in your Composio account.
+
 ---
 
 ## What's NOT working yet
 
 Frontend pages that were tightly coupled to backend-only domains
-(rewards, invites, billing, team, Composio toolkit catalog) still
+(rewards, invites, billing, team) still
 render in the app but their backing RPCs error out. They're harmless
 — just don't expect rewards or billing to do anything. Phase 6 of
 `tasks/todo.md` covers replacing or deleting each.

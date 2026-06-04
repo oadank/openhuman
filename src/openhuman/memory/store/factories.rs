@@ -466,22 +466,12 @@ mod tests {
     // ── effective_embedding_settings (unprobed selection priority) ────────
 
     #[test]
-    fn embedding_settings_defaults_to_ollama_in_local_oauth_fork() {
-        // Local-OAuth fork: the OpenHuman backend Voyage path is dead,
-        // so `MemoryConfig::default()` now seeds an Ollama-based
-        // embedder (`bge-m3`, 1024 dim). The fallback through this
-        // helper must reflect that — otherwise the legacy
-        // `embedding_provider = "cloud"` line gets re-injected on every
-        // `Config::save()` round-trip, which is exactly the user-
-        // reported bug this default flip is meant to fix.
+    fn embedding_settings_defaults_to_none_until_local_embeddings_are_enabled() {
         let mem = MemoryConfig::default();
         let (provider, model, dims) = effective_embedding_settings(&mem, None);
-        assert_eq!(
-            provider, "ollama",
-            "no local-AI config must default to Ollama in the local-OAuth fork"
-        );
-        assert!(!model.is_empty(), "default model must be non-empty");
-        assert_eq!(dims, 1024, "default Ollama dimensions are 1024 (bge-m3)");
+        assert_eq!(provider, "none");
+        assert_eq!(model, "none");
+        assert_eq!(dims, 0);
     }
 
     #[test]
