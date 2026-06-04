@@ -79,15 +79,14 @@ pub fn register_memory_tree_ingest_subscriber(config: Config) {
     }));
     let _ = INGEST_STATE.set(state.clone());
 
-    match crate::core::event_bus::subscribe_global(Arc::new(MemoryTreeIngestSubscriber::new(state))) {
+    match crate::core::event_bus::subscribe_global(Arc::new(MemoryTreeIngestSubscriber::new(state)))
+    {
         Some(handle) => {
             let _ = MEMORY_TREE_INGEST_HANDLE.set(handle);
             log::info!("{LOG_PREFIX} subscriber registered");
         }
         None => {
-            log::warn!(
-                "{LOG_PREFIX} failed to register subscriber — bus not initialized"
-            );
+            log::warn!("{LOG_PREFIX} failed to register subscriber — bus not initialized");
         }
     }
 }
@@ -189,10 +188,20 @@ impl MemoryTreeIngestSubscriber {
 
         // Build buffer key (telegram uses reply_target only, not thread_ts)
         let key = if channel == "telegram" {
-            (channel.to_string(), sender.to_string(), reply_target.to_string())
+            (
+                channel.to_string(),
+                sender.to_string(),
+                reply_target.to_string(),
+            )
         } else {
-            let thread_key = thread_ts.map(|t| format!("thread:{}", t)).unwrap_or_default();
-            (channel.to_string(), sender.to_string(), format!("{}:{}", reply_target, thread_key))
+            let thread_key = thread_ts
+                .map(|t| format!("thread:{}", t))
+                .unwrap_or_default();
+            (
+                channel.to_string(),
+                sender.to_string(),
+                format!("{}:{}", reply_target, thread_key),
+            )
         };
 
         // Build channel label for display
@@ -207,12 +216,15 @@ impl MemoryTreeIngestSubscriber {
         let config = state.config.clone();
 
         // Get or create buffer
-        let buffer = state.buffers.entry(key.clone()).or_insert(ConversationBuffer {
-            messages: Vec::new(),
-            last_flush: instant_now,
-            channel: channel.to_string(),
-            channel_label: channel_label.clone(),
-        });
+        let buffer = state
+            .buffers
+            .entry(key.clone())
+            .or_insert(ConversationBuffer {
+                messages: Vec::new(),
+                last_flush: instant_now,
+                channel: channel.to_string(),
+                channel_label: channel_label.clone(),
+            });
 
         // Add message
         buffer.messages.push(BufferedMessage {
@@ -237,7 +249,8 @@ impl MemoryTreeIngestSubscriber {
         // Check flush conditions
         let should_flush = msg_len >= MAX_BUFFER_SIZE
             || msg_len >= MIN_FLUSH_COUNT
-                && instant_now.duration_since(buffer.last_flush).as_secs() >= MAX_FLUSH_INTERVAL_SECS;
+                && instant_now.duration_since(buffer.last_flush).as_secs()
+                    >= MAX_FLUSH_INTERVAL_SECS;
 
         if should_flush {
             let messages_to_flush = buffer.messages.clone();
@@ -253,7 +266,14 @@ impl MemoryTreeIngestSubscriber {
             drop(state);
 
             // Spawn async ingest
-            self.spawn_ingest(config, key, channel_name, channel_label_flush, owner, messages_to_flush);
+            self.spawn_ingest(
+                config,
+                key,
+                channel_name,
+                channel_label_flush,
+                owner,
+                messages_to_flush,
+            );
         }
     }
 
@@ -298,10 +318,7 @@ impl MemoryTreeIngestSubscriber {
             match result {
                 Ok(ingest_result) => {
                     if ingest_result.already_ingested {
-                        log::debug!(
-                            "{LOG_PREFIX} already ingested source_id={}",
-                            source_id
-                        );
+                        log::debug!("{LOG_PREFIX} already ingested source_id={}", source_id);
                     } else {
                         log::info!(
                             "{LOG_PREFIX} ingest success source_id={} chunks={} dropped={}",
@@ -366,12 +383,27 @@ mod tests {
         assert_eq!(key, ("lark", "alice", "general:thread:thread-1"));
     }
 
-    fn buffer_message_key(channel: &str, sender: &str, reply_target: &str, thread_ts: Option<&str>) -> BufferKey {
+    fn buffer_message_key(
+        channel: &str,
+        sender: &str,
+        reply_target: &str,
+        thread_ts: Option<&str>,
+    ) -> BufferKey {
         if channel == "telegram" {
-            (channel.to_string(), sender.to_string(), reply_target.to_string())
+            (
+                channel.to_string(),
+                sender.to_string(),
+                reply_target.to_string(),
+            )
         } else {
-            let thread_key = thread_ts.map(|t| format!("thread:{}", t)).unwrap_or_default();
-            (channel.to_string(), sender.to_string(), format!("{}:{}", reply_target, thread_key))
+            let thread_key = thread_ts
+                .map(|t| format!("thread:{}", t))
+                .unwrap_or_default();
+            (
+                channel.to_string(),
+                sender.to_string(),
+                format!("{}:{}", reply_target, thread_key),
+            )
         }
     }
 }

@@ -540,9 +540,7 @@ impl SecurityPolicy {
 
             // High-risk commands - REMOVED: all commands allowed in full autonomy mode
             // Only block truly destructive patterns
-            if joined_segment.contains("rm -fr /")
-                || joined_segment.contains(":(){:|:&};:")
-            {
+            if joined_segment.contains("rm -fr /") || joined_segment.contains(":(){:|:&};:") {
                 return CommandRiskLevel::High;
             }
 
